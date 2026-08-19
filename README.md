@@ -213,6 +213,20 @@ Alternatively, flip the config flag and restart:
 
 ---
 
+## Backlog
+
+Ideas for the future — not implemented yet.
+
+- **Agent-agnostic support** — the classifier (`src/classifier.ts`) is already dependency-free
+  and portable. A future version could extract it into a shared `model-router-core` package with
+  thin per-agent adapters (Claude Code, Cursor, Windsurf, …) so the same routing logic works
+  across agents. Each adapter would plug into that agent's own extension API, so capabilities
+  would vary per agent.
+- **Fully automatic model routing** — adopt a model-selection hook if OpenCode ever exposes one,
+  removing the current manual (`F2` / `/model`) or relay (`route` tool) model-switch step.
+
+---
+
 ## Development
 
 ```bash

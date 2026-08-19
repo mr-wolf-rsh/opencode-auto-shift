@@ -26,6 +26,12 @@ export interface RouterConfig {
   complex?: string
   /** Extra escalation keywords, merged with the built-in defaults. */
   keywords?: string[]
+  /**
+   * Optional middle-tier keywords. When non-empty, the classifier gains a
+   * "medium" tier between routine and complex (for three-model setups such as
+   * Claude Haiku / Sonnet / Opus).
+   */
+  medium_keywords?: string[]
   /** Enable the optional LLM classifier (adds one tiny call per message). */
   use_llm_classifier?: boolean
   /** Endpoint config for the LLM classifier. */
@@ -41,6 +47,8 @@ export interface VariantConfig {
   enabled?: boolean
   /** Effort value for complex messages (e.g. `"high"`). */
   complex?: string
+  /** Effort value for medium messages (e.g. `"medium"`). */
+  medium?: string
   /** Effort value for routine messages (e.g. `"low"`). */
   routine?: string
   /**
@@ -56,11 +64,13 @@ export interface NormalizedConfig {
   defaultModel: string
   complexModel: string
   keywords: string[]
+  mediumKeywords: string[]
   useLLMClassifier: boolean
   llmClassifier?: LLMClassifierConfig
   variant: {
     enabled: boolean
     complex?: string
+    medium?: string
     routine?: string
     key?: string
   }
@@ -77,11 +87,13 @@ export function normalizeConfig(input: unknown): NormalizedConfig {
     defaultModel: raw.default ?? "",
     complexModel: raw.complex ?? "",
     keywords: [...DEFAULT_KEYWORDS, ...(raw.keywords ?? [])],
+    mediumKeywords: [...(raw.medium_keywords ?? [])],
     useLLMClassifier: raw.use_llm_classifier ?? false,
     llmClassifier: raw.llm_classifier,
     variant: {
       enabled: variant.enabled ?? true,
       complex: variant.complex ?? "high",
+      medium: variant.medium ?? "medium",
       routine: variant.routine ?? "low",
       key: variant.key,
     },

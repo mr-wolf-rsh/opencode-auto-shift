@@ -51,6 +51,20 @@ describe("classifyHeuristic", () => {
     expect(classifyHeuristic("do the thing", ["confetti"]).complexity).toBe("routine")
   })
 
+  it("supports an optional medium tier", () => {
+    const result = classifyHeuristic("deploy to staging", [], ["deploy"])
+    expect(result.complexity).toBe("medium")
+    expect(result.matched).toContain("deploy")
+  })
+
+  it("prioritizes complex over medium", () => {
+    expect(classifyHeuristic("debug the deploy pipeline", ["debug"], ["deploy"]).complexity).toBe("complex")
+  })
+
+  it("falls back to routine when medium keywords don't match", () => {
+    expect(classifyHeuristic("say hello", [], ["deploy"]).complexity).toBe("routine")
+  })
+
   it("ships a non-empty default keyword list", () => {
     expect(DEFAULT_KEYWORDS.length).toBeGreaterThan(0)
   })

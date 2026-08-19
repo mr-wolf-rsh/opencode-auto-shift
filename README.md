@@ -3,8 +3,8 @@
 Automatic model + reasoning-effort routing for [OpenCode](https://opencode.ai).
 
 Route your work across a cheap "routine" model and a capable "complex" model — DeepSeek Flash /
-Pro, GPT-5-nano / GPT-5, Claude Haiku / Sonnet, or any pair you run. The plugin classifies every
-message and dials the reasoning effort up or down to match, with zero extra LLM cost.
+Pro, GPT-5-nano / GPT-5, Claude Haiku / Sonnet / Opus, or any pair you run. The plugin classifies
+every message and dials the reasoning effort up or down to match, with zero extra LLM cost.
 
 ## Why this exists
 
@@ -110,6 +110,11 @@ without any per-message model swap.
   // Extra escalation keywords (merged with the built-in defaults).
   "keywords": ["architecture", "refactor", "custom-signal"],
 
+  // Optional middle-tier keywords. When non-empty, the classifier gains a
+  // "medium" tier between routine and complex — for three-model setups such as
+  // Claude Haiku / Sonnet / Opus. Empty by default (two tiers).
+  "medium_keywords": ["feature", "refine", "write tests"],
+
   // Optional LLM classifier (off by default — see cost note below).
   "use_llm_classifier": false,
   "llm_classifier": {
@@ -122,6 +127,7 @@ without any per-message model swap.
   "variant": {
     "enabled": true,
     "complex": "high",
+    "medium": "medium",
     "routine": "low",
     // Optional: override the options key used (defaults to a built-in
     // per-provider map, e.g. `reasoningEffort` for OpenAI-compatible providers).
@@ -144,6 +150,9 @@ Single-word keywords match their stem (`debug` → `debugging`, `refactor` → `
 keywords match as case-insensitive substrings. Add or remove entries via `keywords` to tune the
 heuristic for your workflow.
 
+There is no built-in `medium` keyword list — it starts empty. Provide your own via
+`medium_keywords` to opt into three tiers.
+
 ---
 
 ## How routing decides
@@ -151,9 +160,11 @@ heuristic for your workflow.
 1. The user message text is extracted from the incoming message.
 2. If `use_llm_classifier` is on and configured, a tiny model call classifies it as
    `complex`/`routine`; if that call fails or is unavailable, the heuristic runs instead.
-3. Otherwise the heuristic scans for escalation keywords.
+3. Otherwise the heuristic scans for escalation keywords, in priority order: **complex** first,
+   then **medium** (only when `medium_keywords` is configured), then **routine** by default.
 4. The result maps to reasoning effort via `variant`:
    - `complex` → `variant.complex` (default `"high"`)
+   - `medium` → `variant.medium` (default `"medium"`)
    - `routine` → `variant.routine` (default `"low"`)
 
 The effort value is injected only when the active model is **reasoning-capable** and its provider
@@ -198,6 +209,7 @@ Alternatively, flip the config flag and restart:
   or enable the LLM classifier for higher precision.
 - **`route`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands — they are
   invoked by the model (or via an agent that calls them), not typed by you directly.
+- **The LLM classifier is binary** (`complex`/`routine`); the `medium` tier is heuristic-only.
 
 ---
 
@@ -209,6 +221,14 @@ npm test          # unit tests for the classifier + config
 npm run typecheck # tsc --noEmit
 ```
 
+## Author
+
+* **Renzo S.** — [mr-wolf-rsh](https://github.com/mr-wolf-rsh/)
+
+## Contributing
+
+All sorts of suggestions and pull requests are welcome.
+
 ## License
 
-MIT
+[MIT](./LICENSE)

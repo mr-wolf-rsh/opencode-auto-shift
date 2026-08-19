@@ -3,6 +3,7 @@ import {
   classifyHeuristic,
   classifyLLM,
   DEFAULT_KEYWORDS,
+  DEFAULT_MEDIUM_KEYWORDS,
   type Classification,
   type Complexity,
   type LLMClassifierConfig,
@@ -15,7 +16,8 @@ import { effortKeyFor } from "./effort.js"
  *
  * What it does automatically (zero extra LLM cost):
  *   - Routes reasoning effort per message via the `chat.params` hook. Complex
- *     messages get a high-effort override, routine messages a low-effort one.
+ *     messages get a high-effort override, routine messages a low-effort one
+ *     (and, when configured, medium messages a medium-effort one).
  *
  * What it does on demand (via tools exposed to the model):
  *   - `route`: re-send a prompt to a specific model (per-prompt model override
@@ -33,7 +35,7 @@ const server: Plugin = async (input, options) => {
       const result = await classifyLLM(text, cfg.llmClassifier)
       if (result) return result
     }
-    return classifyHeuristic(text, cfg.keywords)
+    return classifyHeuristic(text, cfg.keywords, cfg.mediumKeywords)
   }
 
   function log(message: string) {
@@ -54,7 +56,12 @@ const server: Plugin = async (input, options) => {
       if (!text) return
 
       const result = await classify(text)
-      const effort = result.complexity === "complex" ? cfg.variant.complex : cfg.variant.routine
+      const effort =
+        result.complexity === "complex"
+          ? cfg.variant.complex
+          : result.complexity === "medium"
+            ? cfg.variant.medium
+            : cfg.variant.routine
       if (!effort) return
 
       log(`${result.complexity} -> ${effort} effort (matched: ${result.matched.join(", ") || "none"})`)
@@ -147,7 +154,7 @@ function extractText(value: unknown): string {
   return ""
 }
 
-export { classifyHeuristic, classifyLLM, DEFAULT_KEYWORDS, normalizeConfig, effortKeyFor }
+export { classifyHeuristic, classifyLLM, DEFAULT_KEYWORDS, DEFAULT_MEDIUM_KEYWORDS, normalizeConfig, effortKeyFor }
 export type { Classification, Complexity, LLMClassifierConfig, NormalizedConfig, RouterConfig, VariantConfig }
 
 export default {

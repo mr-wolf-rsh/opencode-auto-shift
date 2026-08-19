@@ -33,4 +33,18 @@ describe("normalizeConfig", () => {
   it("respects the master kill switch", () => {
     expect(normalizeConfig({ enabled: false }).enabled).toBe(false)
   })
+
+  it("defaults variant.medium to 'medium'", () => {
+    expect(normalizeConfig(undefined).variant.medium).toBe("medium")
+  })
+
+  it("reads medium keywords and medium effort", () => {
+    const cfg = normalizeConfig({ medium_keywords: ["deploy"], variant: { medium: "medium" } })
+    expect(cfg.mediumKeywords).toEqual(["deploy"])
+    expect(cfg.variant.medium).toBe("medium")
+  })
+
+  it("has empty medium keywords by default (2-tier)", () => {
+    expect(normalizeConfig(undefined).mediumKeywords).toEqual([])
+  })
 })

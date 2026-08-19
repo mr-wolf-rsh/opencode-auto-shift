@@ -8,7 +8,7 @@
  * call per message.
  */
 
-export type Complexity = "routine" | "complex"
+export type Complexity = "routine" | "medium" | "complex"
 
 export interface Classification {
   complexity: Complexity
@@ -57,22 +57,20 @@ export const DEFAULT_KEYWORDS: string[] = [
   "explain how",
 ]
 
+/**
+ * Optional middle-tier keywords. Empty by default, so the classifier is a
+ * two-tier (routine/complex) split unless you configure a `medium` tier.
+ */
+export const DEFAULT_MEDIUM_KEYWORDS: string[] = []
+
 const WORD_RE = /^[a-z0-9]+$/
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-/**
- * Classify a message with the heuristic keyword scanner.
- *
- * @param text       Raw user message text.
- * @param keywords   Keyword list. Defaults to {@link DEFAULT_KEYWORDS}.
- */
-export function classifyHeuristic(text: string, keywords: string[] = DEFAULT_KEYWORDS): Classification {
-  const msg = text.toLowerCase().trim()
+function matchKeywords(msg: string, keywords: string[]): string[] {
   const matched: string[] = []
-
   for (const keyword of keywords) {
     const kw = keyword.toLowerCase().trim()
     if (!kw) continue
@@ -86,22 +84,48 @@ export function classifyHeuristic(text: string, keywords: string[] = DEFAULT_KEY
       if (msg.includes(kw)) matched.push(keyword)
     }
   }
+  return matched
+}
 
-  return {
-    complexity: matched.length > 0 ? "complex" : "routine",
-    matched,
-    source: "heuristic",
+/**
+ * Classify a message with the heuristic keyword scanner.
+ *
+ * Tiers are checked in priority order: complex first, then medium, then the
+ * routine default. Provide `mediumKeywords` to enable a middle tier (useful
+ * for three-model setups such as Claude Haiku / Sonnet / Opus).
+ *
+ * @param text            Raw user message text.
+ * @param complexKeywords Keyword list for the complex tier. Defaults to {@link DEFAULT_KEYWORDS}.
+ * @param mediumKeywords  Keyword list for the optional medium tier. Defaults to empty.
+ */
+export function classifyHeuristic(
+  text: string,
+  complexKeywords: string[] = DEFAULT_KEYWORDS,
+  mediumKeywords: string[] = DEFAULT_MEDIUM_KEYWORDS,
+): Classification {
+  const msg = text.toLowerCase().trim()
+
+  const complexMatched = matchKeywords(msg, complexKeywords)
+  if (complexMatched.length > 0) {
+    return { complexity: "complex", matched: complexMatched, source: "heuristic" }
   }
+
+  const mediumMatched = matchKeywords(msg, mediumKeywords)
+  if (mediumMatched.length > 0) {
+    return { complexity: "medium", matched: mediumMatched, source: "heuristic" }
+  }
+
+  return { complexity: "routine", matched: [], source: "heuristic" }
 }
 
 /**
  * Configuration for the optional LLM classifier. Uses any OpenAI-compatible
- * chat/completions endpoint (DeepSeek is OpenAI-compatible).
+ * chat/completions endpoint.
  */
 export interface LLMClassifierConfig {
-  /** Base URL without the trailing path, e.g. `https://api.deepseek.com/v1`. */
+  /** Base URL without the trailing path, e.g. `https://api.openai.com/v1`. */
   baseUrl: string
-  /** Small/cheap model to run the classification, e.g. `deepseek-chat`. */
+  /** Small/cheap model to run the classification, e.g. `gpt-4o-mini`. */
   model: string
   /** Literal API key. Prefer `apiKeyEnv`. */
   apiKey?: string
@@ -113,6 +137,9 @@ export interface LLMClassifierConfig {
  * Classify via a tiny LLM call. Returns `null` (and defers to the heuristic)
  * when the classifier is misconfigured, the endpoint fails, or the reply is
  * not parseable — the router must never crash or block on classification.
+ *
+ * The LLM classifier is binary (complex/routine); the `medium` tier is
+ * heuristic-only.
  */
 export async function classifyLLM(text: string, config: LLMClassifierConfig): Promise<Classification | null> {
   const apiKey = config.apiKey ?? (config.apiKeyEnv ? process.env[config.apiKeyEnv] : undefined)

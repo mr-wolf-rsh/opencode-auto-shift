@@ -6,8 +6,8 @@ import { DEFAULT_KEYWORDS, type LLMClassifierConfig } from "./classifier.js"
  *
  * ```json
  * ["opencode-model-router", {
- *   "default": "deepseek/deepseek-v4-flash",
- *   "complex": "deepseek/deepseek-v4-pro",
+ *   "default": "provider/routine-model",
+ *   "complex": "provider/complex-model",
  *   "keywords": ["architecture", "refactor"],
  *   "use_llm_classifier": false,
  *   "variant": { "complex": "high", "routine": "low" }
@@ -17,9 +17,12 @@ import { DEFAULT_KEYWORDS, type LLMClassifierConfig } from "./classifier.js"
 export interface RouterConfig {
   /** Master kill switch. `false` makes the plugin a complete no-op. */
   enabled?: boolean
-  /** Routine/default model (`provider/model`). Used by the `route` tool. */
+  /**
+   * Your routine/baseline model (`provider/model`). Informational: the plugin
+   * lowers effort on whatever model is active rather than switching to it.
+   */
   default?: string
-  /** Complex model (`provider/model`). Used by the `route` tool. */
+  /** Escalation model (`provider/model`), used by the `route` tool. */
   complex?: string
   /** Extra escalation keywords, merged with the built-in defaults. */
   keywords?: string[]
@@ -43,7 +46,7 @@ export interface VariantConfig {
   /**
    * Override the `options` key used to set reasoning effort. When omitted the
    * plugin picks the key from a built-in provider map (e.g. `reasoningEffort`
-   * for OpenAI-compatible providers such as DeepSeek).
+   * for OpenAI-compatible providers).
    */
   key?: string
 }
@@ -71,8 +74,8 @@ export function normalizeConfig(input: unknown): NormalizedConfig {
 
   return {
     enabled: raw.enabled ?? true,
-    defaultModel: raw.default ?? "deepseek/deepseek-v4-flash",
-    complexModel: raw.complex ?? "deepseek/deepseek-v4-pro",
+    defaultModel: raw.default ?? "",
+    complexModel: raw.complex ?? "",
     keywords: [...DEFAULT_KEYWORDS, ...(raw.keywords ?? [])],
     useLLMClassifier: raw.use_llm_classifier ?? false,
     llmClassifier: raw.llm_classifier,

@@ -75,6 +75,12 @@ const server: Plugin = async (input, options) => {
         },
         async execute(args, ctx) {
           const target = args.model ?? cfg.complexModel
+          if (!target) {
+            return {
+              title: "route",
+              output: "No target model configured. Pass a `model` argument or set `complex` in the plugin options.",
+            }
+          }
           const slash = target.indexOf("/")
           const providerID = slash >= 0 ? target.slice(0, slash) : ""
           const modelID = slash >= 0 ? target.slice(slash + 1) : ""

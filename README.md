@@ -1,10 +1,29 @@
 # opencode-model-router
 
-Automatic model + reasoning-effort routing for [OpenCode](https://opencode.ai) — built for a
-DeepSeek Flash (routine) / Pro (complex) setup.
+Automatic model + reasoning-effort routing for [OpenCode](https://opencode.ai).
 
-Zero cost by default: the classifier is a keyword heuristic with **no extra LLM call**. It only
-spends tokens if you explicitly opt into the LLM classifier.
+Route your work across a cheap "routine" model and a capable "complex" model — DeepSeek Flash /
+Pro, GPT-5-nano / GPT-5, Claude Haiku / Sonnet, or any pair you run. The plugin classifies every
+message and dials the reasoning effort up or down to match, with zero extra LLM cost.
+
+## Why this exists
+
+I built my first serious project with the OpenCode agent. The result was great — but the token
+counter wasn't. Even with optimizers, prompt tweaks, and every performance trick I could find, a
+huge share of the spend went to messages that simply didn't need a strong model: a one-line edit,
+a "run the tests", a rename.
+
+The pattern was hard to miss. Most of my messages were routine. A small minority — architecture,
+debugging, migrations, anything touching multiple files — were genuinely hard and deserved real
+compute. The rest were burning capable-model tokens for busywork.
+
+So I went looking for a tool that would route each message to the right model automatically.
+There wasn't one. So I built it.
+
+That's the core idea behind opencode-model-router: classify every message, route reasoning effort
+(and, where OpenCode allows, the model itself) so cheap work stays cheap and hard work gets the
+capability it needs. The default classifier is a zero-cost keyword heuristic on purpose — spending
+tokens to save tokens would defeat the entire point.
 
 ---
 
@@ -52,12 +71,22 @@ without any per-message model swap.
      "$schema": "https://opencode.ai/config.json",
      "plugin": [
        ["opencode-model-router", {
-         "default": "deepseek/deepseek-v4-flash",
-         "complex": "deepseek/deepseek-v4-pro",
+         "default": "provider/routine-model",
+         "complex": "provider/complex-model",
          "variant": { "complex": "high", "routine": "low" }
        }]
      ]
    }
+   ```
+
+   For example, a DeepSeek Flash/Pro split:
+
+   ```json
+   ["opencode-model-router", {
+     "default": "deepseek/deepseek-v4-flash",
+     "complex": "deepseek/deepseek-v4-pro",
+     "variant": { "complex": "high", "routine": "low" }
+   }]
    ```
 
 2. Restart OpenCode (or run `/plugin` to load it). The plugin is a no-op until configured with a
@@ -72,9 +101,11 @@ without any per-message model swap.
   // Master kill switch. false = complete no-op.
   "enabled": true,
 
-  // Models (provider/model). Used by the `route` tool.
-  "default": "deepseek/deepseek-v4-flash",
-  "complex": "deepseek/deepseek-v4-pro",
+  // Your routine and complex models (provider/model). `complex` is used by the
+  // `route` tool; `default` documents your baseline (the plugin lowers effort on
+  // whatever model is active).
+  "default": "provider/routine-model",
+  "complex": "provider/complex-model",
 
   // Extra escalation keywords (merged with the built-in defaults).
   "keywords": ["architecture", "refactor", "custom-signal"],
@@ -82,9 +113,9 @@ without any per-message model swap.
   // Optional LLM classifier (off by default — see cost note below).
   "use_llm_classifier": false,
   "llm_classifier": {
-    "baseUrl": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
-    "apiKeyEnv": "DEEPSEEK_API_KEY"
+    "baseUrl": "https://your-provider.example/v1", // any OpenAI-compatible endpoint
+    "model": "your-small-model",
+    "apiKeyEnv": "YOUR_API_KEY_ENV"
   },
 
   // Reasoning-effort routing. Set to false to disable entirely.
@@ -126,7 +157,7 @@ heuristic for your workflow.
    - `routine` → `variant.routine` (default `"low"`)
 
 The effort value is injected only when the active model is **reasoning-capable** and its provider
-uses a known `reasoningEffort` key (OpenAI-compatible providers such as DeepSeek included).
+uses a known `reasoningEffort` key (all OpenAI-compatible providers, and several others).
 
 ### Cost tradeoff of the LLM classifier
 
@@ -143,14 +174,14 @@ The `enabled` flag on an MCP server in `opencode.json` is **startup-only**. To t
 runtime, the plugin exposes the `mcp_toggle` tool:
 
 ```
-mcp_toggle(name="fanvue", action="connect")
-mcp_toggle(name="fanvue", action="disconnect")
+mcp_toggle(name="my-server", action="connect")
+mcp_toggle(name="my-server", action="disconnect")
 ```
 
 Alternatively, flip the config flag and restart:
 
 ```jsonc
-"mcp": { "fanvue": { "enabled": false, "type": "local", "command": ["..."] } }
+"mcp": { "my-server": { "enabled": false, "type": "local", "command": ["..."] } }
 ```
 
 ---
@@ -174,7 +205,7 @@ Alternatively, flip the config flag and restart:
 
 ```bash
 npm install
-npm test          # unit tests for the classifier
+npm test          # unit tests for the classifier + config
 npm run typecheck # tsc --noEmit
 ```
 

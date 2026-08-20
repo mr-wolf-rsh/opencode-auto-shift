@@ -2,6 +2,10 @@
   "name": "opencode-auto-shift",
   "version": "0.1.0",
   "description": "An automatic gearbox for your OpenCode models — eco/normal/sport drive modes, auto-shift reasoning effort per message, zero extra LLM cost",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mr-wolf-rsh/opencode-auto-shift.git"
+  },
   "type": "module",
   "license": "MIT",
   "exports": {

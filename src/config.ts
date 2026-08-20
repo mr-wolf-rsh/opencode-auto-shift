@@ -49,6 +49,15 @@ export interface AutoShiftConfig {
   /** Endpoint config for the LLM classifier. */
   llm_classifier?: LLMClassifierConfig
   /**
+   * Automatically route each user message to the model of its classified
+   * drive mode (eco/normal/sport -> `modes.eco` / `modes.normal` / `modes.sport`).
+   * Requires a recent opencode that persists the `chat.message` hook's message
+   * mutation (message-level model override). Off by default; only messages that
+   * belong to the session's primary agent are routed (subagent messages keep
+   * their own configured models).
+   */
+  auto_route_models?: boolean
+  /**
    * The gearbox: numbered gear positions (`"1"`, `"2"`, ...) mapped to
    * reasoning-effort strings passed through verbatim to the provider. `key`
    * overrides the `options` key used to set effort (defaults to a built-in
@@ -95,6 +104,7 @@ export interface NormalizedConfig {
   ecoModel: string
   normalModel: string
   sportModel: string
+  autoRouteModels: boolean
   sportKeywords: string[]
   normalKeywords: string[]
   useLLMClassifier: boolean
@@ -137,6 +147,7 @@ export function normalizeConfig(input: unknown): NormalizedConfig {
     normalKeywords: [...(raw.normal_keywords ?? [])],
     useLLMClassifier: raw.use_llm_classifier ?? false,
     llmClassifier: raw.llm_classifier,
+    autoRouteModels: raw.auto_route_models ?? false,
     gears: {
       enabled: gearsRaw.enabled ?? true,
       key: typeof gearsRaw.key === "string" ? gearsRaw.key : undefined,

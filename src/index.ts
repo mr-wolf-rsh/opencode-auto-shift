@@ -17,6 +17,7 @@ import {
   type ShiftConfig,
 } from "./config.js"
 import { effortKeyFor } from "./effort.js"
+import { isSameModel, parseModelSpec, routeTarget } from "./routing.js"
 
 /**
  * opencode-auto-shift plugin entry — an automatic gearbox for your models.
@@ -39,7 +40,7 @@ import { effortKeyFor } from "./effort.js"
  */
 const server: Plugin = async (input, options) => {
   const cfg = normalizeConfig(options)
-  const { client } = input
+  const { client, serverUrl } = input
 
   // Manual gear override (null = automatic shifting). Sticky across messages
   // until cleared — like moving a gearbox into manual mode.
@@ -58,6 +59,46 @@ const server: Plugin = async (input, options) => {
   }
 
   return {
+    "chat.message": async (hookInput, output) => {
+      if (!cfg.enabled || !cfg.autoRouteModels) return
+
+      const text = extractText(output.parts)
+      if (!text) return
+
+      // Only route messages that belong to a primary agent. Subagent messages
+      // (task-tool subtasks) keep their own configured models — auto-routing
+      // them would override e.g. an sdd-apply agent pinned to the pro model.
+      if (hookInput.agent) {
+        try {
+          const res = await fetch(new URL("/agent", serverUrl))
+          if (res.ok) {
+            const agents = (await res.json()) as Array<{ name: string; mode: string }>
+            const agent = agents.find((entry) => entry.name === hookInput.agent)
+            if (agent && agent.mode !== "primary") return
+          }
+        } catch {
+          // Agent registry unavailable — proceed without the subagent guard.
+        }
+      }
+
+      const result = await classify(text)
+      const target = routeTarget(result.complexity, cfg)
+      if (!target) return
+
+      const spec = parseModelSpec(target)
+      if (!spec) {
+        log(`auto-route: invalid model specifier "${target}"`)
+        return
+      }
+
+      // Skip the write when the message is already on the routed model to
+      // avoid needless session-model churn.
+      if (isSameModel(output.message.model, spec)) return
+
+      output.message.model = spec
+      log(`auto-route ${result.complexity} -> ${target} (matched: ${result.matched.join(", ") || "none"})`)
+    },
+
     "chat.params": async (hookInput, output) => {
       if (!cfg.enabled || !cfg.gears.enabled) return
 
@@ -237,6 +278,9 @@ export {
   normalizeConfig,
   resolveEffort,
   effortKeyFor,
+  parseModelSpec,
+  routeTarget,
+  isSameModel,
 }
 export type {
   Classification,

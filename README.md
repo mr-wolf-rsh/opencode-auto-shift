@@ -59,34 +59,26 @@ tokens to save tokens would defeat the entire point.
 | Capability | Mechanism | Automatic? | Cost |
 |---|---|---|---|
 | Gear shifting (reasoning effort) | `chat.params` hook → `options.reasoningEffort`, via the `shifts` program | ✅ per message | zero |
+| Model routing (drive mode) | `chat.message` hook → message-level `model` override, persisted before the message is processed | ✅ per message (opt-in, `auto_route_models`) | zero |
 | Manual gear override | `set_gear` tool → forces a gear until cleared | 🔧 on demand | zero |
 | MCP enable/disable | `client.mcp.connect` / `disconnect` tool | 🔧 on demand | zero |
 | Drive-mode switch (model) | `switch_mode` tool → `client.session.prompt` model override | 🔧 on demand | zero |
 | LLM classifier | optional tiny classification call | ✅ when enabled | ~1 small call/message |
 
-### Why model routing is not fully automatic
+### Model routing is automatic when you opt in
 
-OpenCode's plugin API has **no hook that changes the model of an in-flight message**. Verified
-against the OpenCode source (`packages/plugin/src/index.ts`, `packages/opencode/src/session/llm/request.ts`):
+With `auto_route_models: true`, every user message is classified and its `model`
+field is set to the configured drive-mode model before the message is processed
+(routine → `modes.eco`, complex → `modes.sport`, three-tier setups → `modes.normal`).
+This works through the `chat.message` hook: opencode persists the hook's message
+mutation and uses the saved message's `model` to resolve the LLM request
+(`getModel(lastUser.model.providerID, lastUser.model.modelID)`), so the routed
+model is what actually answers. Messages that belong to subagents are left
+untouched — a subagent keeps its own configured model.
 
-- `chat.message` and `chat.params` both receive the *already-resolved* model as read-only input;
-  neither hook's output has a `model` field.
-- `session.update` only accepts `title`/`metadata`/`permission`/`time`.
-- `config.update({ model })` changes the *global default* model, not the current session/turn.
-
-The only per-prompt model override is `client.session.prompt({ body: { model } })`, which works
-when the plugin *owns* the prompt — not for transparently re-routing a message you type in the TUI
-(the relay would duplicate the turn).
-
-**What this means in practice:**
-
-- **Gears (reasoning effort)** are shifted automatically and instantly (the core zero-cost win).
-- **Model changes** are either manual (`F2` cycles recent models, `/model` picks one) or driven by
-  the `switch_mode` tool when a model decides a task needs a different drive mode.
-
-If OpenCode later exposes a model-selection hook, this plugin will adopt it for fully automatic
-model routing. Until then, the heuristic classifier + gear shifting get you most of the value
-without any per-message model swap.
+This requires an opencode version whose `chat.message` hook persists the message
+mutation (verified on 1.18.x). The `switch_mode` tool remains as the manual,
+on-demand way to force a model for a prompt.
 
 ---
 
@@ -222,6 +214,12 @@ without any per-message model swap.
     "model": "your-small-model",
     "apiKeyEnv": "YOUR_API_KEY_ENV"
   },
+
+  // Automatic model routing: classify every user message and set its model to
+  // the configured drive-mode model (eco/normal/sport -> `modes` slots) before
+  // it is processed. Requires an opencode that persists the `chat.message`
+  // message mutation (verified on 1.18.x). Subagent messages are never routed.
+  "auto_route_models": true,
 
   // Log routing decisions to stderr.
   "debug": false
@@ -384,7 +382,13 @@ Alternatively, flip the config flag and restart:
 
 ## Limitations
 
-- **No automatic per-message model swap** — see "Why model routing is not fully automatic" above.
+- **Automatic model routing needs a recent opencode**: it relies on the `chat.message` hook's
+  message mutation being persisted and honored at request time (verified on 1.18.x). On older
+  versions the hook still fires but the model override is ignored — use `switch_mode` there.
+- **Subagent messages are never auto-routed**: a subagent keeps the model its agent config pins.
+- **Manual model choices are not preserved while auto-routing is on**: every primary-agent message
+  is re-classified, so a manual `F2`/`/model` selection is overridden by the classifier on the next
+  message. Turn `auto_route_models` off when you want full manual control.
 - **Gear routing needs a `gears` table**: with no configured gear table, the plugin injects no
   effort (there is no universal default, since effort vocabulary is provider-specific). Set
   `"gears": false` to disable gear routing explicitly if you only want the tools.
@@ -412,8 +416,6 @@ Ideas for the future — not implemented yet.
   adapters — Claude Code, Cursor, Windsurf, OpenClaw, Grok, or any agent with an extension API —
   so the same routing logic works across agents. Each adapter would plug into that agent's own
   extension API, so capabilities would vary per agent.
-- **Fully automatic model routing** — adopt a model-selection hook if OpenCode ever exposes one,
-  removing the current manual (`F2` / `/model`) or relay (`switch_mode` tool) model-switch step.
 
 ---
 

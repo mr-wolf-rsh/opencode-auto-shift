@@ -2,28 +2,34 @@ import { tool, type Plugin } from "@opencode-ai/plugin"
 import {
   classifyHeuristic,
   classifyLLM,
-  DEFAULT_KEYWORDS,
-  DEFAULT_MEDIUM_KEYWORDS,
+  DEFAULT_SPORT_KEYWORDS,
+  DEFAULT_NORMAL_KEYWORDS,
   type Classification,
   type Complexity,
   type LLMClassifierConfig,
 } from "./classifier.js"
-import { normalizeConfig, type NormalizedConfig, type RouterConfig, type VariantConfig } from "./config.js"
+import {
+  normalizeConfig,
+  type NormalizedConfig,
+  type AutoShiftConfig,
+  type GearsConfig,
+} from "./config.js"
 import { effortKeyFor } from "./effort.js"
 
 /**
- * opencode-model-router plugin entry.
+ * opencode-auto-shift plugin entry — an automatic gearbox for your models.
  *
- * What it does automatically (zero extra LLM cost):
- *   - Routes reasoning effort per message via the `chat.params` hook. Complex
- *     messages get a high-effort override, routine messages a low-effort one
- *     (and, when configured, medium messages a medium-effort one).
+ * Drive modes (model tiers): eco (routine), normal (middle), sport (heavy).
+ * Gears (reasoning effort) are shifted automatically per message via the
+ * `chat.params` hook: sport messages get high effort, eco messages low (and,
+ * when configured, normal messages medium).
  *
  * What it does on demand (via tools exposed to the model):
- *   - `route`: re-send a prompt to a specific model (per-prompt model override
- *     relay). opencode's plugin API has no hook to change the model of an
- *     in-flight message, so model changes are either manual (F2 / /model) or
- *     driven through this relay tool.
+ *   - `shift`: re-send a prompt to a specific model (per-prompt model override
+ *     relay) — upshift to sport mode when the current model isn't enough.
+ *     opencode's plugin API has no hook to change the model of an in-flight
+ *     message, so model changes are either manual (F2 / /model) or driven
+ *     through this relay tool.
  *   - `mcp_toggle`: connect/disconnect an MCP server at runtime.
  */
 const server: Plugin = async (input, options) => {
@@ -35,21 +41,21 @@ const server: Plugin = async (input, options) => {
       const result = await classifyLLM(text, cfg.llmClassifier)
       if (result) return result
     }
-    return classifyHeuristic(text, cfg.keywords, cfg.mediumKeywords)
+    return classifyHeuristic(text, cfg.sportKeywords, cfg.normalKeywords)
   }
 
   function log(message: string) {
-    if (cfg.debug) console.error(`[opencode-model-router] ${message}`)
+    if (cfg.debug) console.error(`[opencode-auto-shift] ${message}`)
   }
 
   return {
     "chat.params": async (hookInput, output) => {
-      if (!cfg.enabled || !cfg.variant.enabled) return
+      if (!cfg.enabled || !cfg.gears.enabled) return
 
       // Only reasoning-capable models accept a reasoning-effort override.
       if (hookInput.model.capabilities.reasoning !== true) return
 
-      const key = cfg.variant.key ?? effortKeyFor(hookInput.model.api.npm)
+      const key = cfg.gears.key ?? effortKeyFor(hookInput.model.api.npm)
       if (!key) return
 
       const text = extractText(hookInput.message)
@@ -57,42 +63,43 @@ const server: Plugin = async (input, options) => {
 
       const result = await classify(text)
       const effort =
-        result.complexity === "complex"
-          ? cfg.variant.complex
-          : result.complexity === "medium"
-            ? cfg.variant.medium
-            : cfg.variant.routine
+        result.complexity === "sport"
+          ? cfg.gears.sport
+          : result.complexity === "normal"
+            ? cfg.gears.normal
+            : cfg.gears.eco
       if (!effort) return
 
-      log(`${result.complexity} -> ${effort} effort (matched: ${result.matched.join(", ") || "none"})`)
+      log(`${result.complexity} mode -> ${effort} effort (matched: ${result.matched.join(", ") || "none"})`)
       output.options[key] = effort
     },
 
     tool: {
-      route: tool({
+      shift: tool({
         description:
-          "Route a prompt to a specific model by sending it as a new message with a model override. " +
-          "Use this to escalate a complex task to a stronger model when the current model is insufficient.",
+          "Shift up a gear: route a prompt to a stronger (sport) model by sending it as a new " +
+          "message with a model override. Use this to escalate a complex task when the current " +
+          "model is insufficient.",
         args: {
           prompt: tool.schema.string().describe("The prompt text to send to the target model."),
           model: tool.schema
             .string()
             .optional()
-            .describe("Target model as 'provider/model'. Defaults to the configured complex model."),
+            .describe("Target model as 'provider/model'. Defaults to the configured sport model."),
         },
         async execute(args, ctx) {
-          const target = args.model ?? cfg.complexModel
+          const target = args.model ?? cfg.sportModel
           if (!target) {
             return {
-              title: "route",
-              output: "No target model configured. Pass a `model` argument or set `complex` in the plugin options.",
+              title: "shift",
+              output: "No target model configured. Pass a `model` argument or set `sport` in the plugin options.",
             }
           }
           const slash = target.indexOf("/")
           const providerID = slash >= 0 ? target.slice(0, slash) : ""
           const modelID = slash >= 0 ? target.slice(slash + 1) : ""
           if (!providerID || !modelID) {
-            return { title: "route", output: `Invalid model specifier "${target}" (expected provider/model)` }
+            return { title: "shift", output: `Invalid model specifier "${target}" (expected provider/model)` }
           }
           try {
             await client.session.prompt({
@@ -102,9 +109,9 @@ const server: Plugin = async (input, options) => {
                 parts: [{ type: "text", text: args.prompt }],
               },
             })
-            return { title: "route", output: `Sent prompt to ${target}` }
+            return { title: "shift", output: `Shifted to ${target}` }
           } catch (error) {
-            return { title: "route", output: `Failed to route to ${target}: ${String(error)}` }
+            return { title: "shift", output: `Failed to shift to ${target}: ${String(error)}` }
           }
         },
       }),
@@ -154,10 +161,24 @@ function extractText(value: unknown): string {
   return ""
 }
 
-export { classifyHeuristic, classifyLLM, DEFAULT_KEYWORDS, DEFAULT_MEDIUM_KEYWORDS, normalizeConfig, effortKeyFor }
-export type { Classification, Complexity, LLMClassifierConfig, NormalizedConfig, RouterConfig, VariantConfig }
+export {
+  classifyHeuristic,
+  classifyLLM,
+  DEFAULT_SPORT_KEYWORDS,
+  DEFAULT_NORMAL_KEYWORDS,
+  normalizeConfig,
+  effortKeyFor,
+}
+export type {
+  Classification,
+  Complexity,
+  LLMClassifierConfig,
+  NormalizedConfig,
+  AutoShiftConfig,
+  GearsConfig,
+}
 
 export default {
-  id: "opencode-model-router",
+  id: "opencode-auto-shift",
   server,
 }

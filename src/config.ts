@@ -1,56 +1,55 @@
-import { DEFAULT_KEYWORDS, type LLMClassifierConfig } from "./classifier.js"
+import { DEFAULT_SPORT_KEYWORDS, type LLMClassifierConfig } from "./classifier.js"
 
 /**
  * User-facing plugin options, as supplied in the `plugin` array of
  * `opencode.json`:
  *
  * ```json
- * ["opencode-model-router", {
- *   "default": "provider/routine-model",
- *   "complex": "provider/complex-model",
- *   "keywords": ["architecture", "refactor"],
- *   "use_llm_classifier": false,
- *   "variant": { "complex": "high", "routine": "low" }
+ * ["opencode-auto-shift", {
+ *   "eco": "provider/eco-model",
+ *   "sport": "provider/sport-model",
+ *   "sport_keywords": ["architecture", "refactor"],
+ *   "gears": { "sport": "high", "eco": "low" }
  * }]
  * ```
  */
-export interface RouterConfig {
+export interface AutoShiftConfig {
   /** Master kill switch. `false` makes the plugin a complete no-op. */
   enabled?: boolean
   /**
-   * Your routine/baseline model (`provider/model`). Informational: the plugin
+   * Your eco/baseline model (`provider/model`). Informational: the plugin
    * lowers effort on whatever model is active rather than switching to it.
    */
-  default?: string
-  /** Escalation model (`provider/model`), used by the `route` tool. */
-  complex?: string
-  /** Extra escalation keywords, merged with the built-in defaults. */
-  keywords?: string[]
+  eco?: string
+  /** Sport/escalation model (`provider/model`), used by the `shift` tool. */
+  sport?: string
+  /** Extra sport-mode escalation keywords, merged with the built-in defaults. */
+  sport_keywords?: string[]
   /**
-   * Optional middle-tier keywords. When non-empty, the classifier gains a
-   * "medium" tier between routine and complex (for three-model setups such as
+   * Optional normal-mode keywords. When non-empty, the classifier gains a
+   * "normal" tier between eco and sport (for three-model setups such as
    * Claude Haiku / Sonnet / Opus).
    */
-  medium_keywords?: string[]
+  normal_keywords?: string[]
   /** Enable the optional LLM classifier (adds one tiny call per message). */
   use_llm_classifier?: boolean
   /** Endpoint config for the LLM classifier. */
   llm_classifier?: LLMClassifierConfig
-  /** Reasoning-effort routing. Set to `false` to disable. */
-  variant?: VariantConfig | false
+  /** Gear (reasoning-effort) routing. Set to `false` to disable. */
+  gears?: GearsConfig | false
   /** Log routing decisions to stderr (for debugging the classifier). */
   debug?: boolean
 }
 
-export interface VariantConfig {
-  /** Whether effort routing is active. Defaults to `true`. */
+export interface GearsConfig {
+  /** Whether gear (effort) routing is active. Defaults to `true`. */
   enabled?: boolean
-  /** Effort value for complex messages (e.g. `"high"`). */
-  complex?: string
-  /** Effort value for medium messages (e.g. `"medium"`). */
-  medium?: string
-  /** Effort value for routine messages (e.g. `"low"`). */
-  routine?: string
+  /** Effort value in sport mode (e.g. `"high"`). */
+  sport?: string
+  /** Effort value in normal mode (e.g. `"medium"`). */
+  normal?: string
+  /** Effort value in eco mode (e.g. `"low"`). */
+  eco?: string
   /**
    * Override the `options` key used to set reasoning effort. When omitted the
    * plugin picks the key from a built-in provider map (e.g. `reasoningEffort`
@@ -61,41 +60,41 @@ export interface VariantConfig {
 
 export interface NormalizedConfig {
   enabled: boolean
-  defaultModel: string
-  complexModel: string
-  keywords: string[]
-  mediumKeywords: string[]
+  ecoModel: string
+  sportModel: string
+  sportKeywords: string[]
+  normalKeywords: string[]
   useLLMClassifier: boolean
   llmClassifier?: LLMClassifierConfig
-  variant: {
+  gears: {
     enabled: boolean
-    complex?: string
-    medium?: string
-    routine?: string
+    sport?: string
+    normal?: string
+    eco?: string
     key?: string
   }
   debug: boolean
 }
 
 export function normalizeConfig(input: unknown): NormalizedConfig {
-  const raw = (input ?? {}) as RouterConfig
+  const raw = (input ?? {}) as AutoShiftConfig
 
-  const variant = raw.variant === false ? { enabled: false } : (raw.variant ?? {})
+  const gears = raw.gears === false ? { enabled: false } : (raw.gears ?? {})
 
   return {
     enabled: raw.enabled ?? true,
-    defaultModel: raw.default ?? "",
-    complexModel: raw.complex ?? "",
-    keywords: [...DEFAULT_KEYWORDS, ...(raw.keywords ?? [])],
-    mediumKeywords: [...(raw.medium_keywords ?? [])],
+    ecoModel: raw.eco ?? "",
+    sportModel: raw.sport ?? "",
+    sportKeywords: [...DEFAULT_SPORT_KEYWORDS, ...(raw.sport_keywords ?? [])],
+    normalKeywords: [...(raw.normal_keywords ?? [])],
     useLLMClassifier: raw.use_llm_classifier ?? false,
     llmClassifier: raw.llm_classifier,
-    variant: {
-      enabled: variant.enabled ?? true,
-      complex: variant.complex ?? "high",
-      medium: variant.medium ?? "medium",
-      routine: variant.routine ?? "low",
-      key: variant.key,
+    gears: {
+      enabled: gears.enabled ?? true,
+      sport: gears.sport ?? "high",
+      normal: gears.normal ?? "medium",
+      eco: gears.eco ?? "low",
+      key: gears.key,
     },
     debug: raw.debug ?? false,
   }

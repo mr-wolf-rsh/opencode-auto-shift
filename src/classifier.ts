@@ -1,6 +1,7 @@
 /**
  * Message complexity classifier.
  *
+ * Drive modes (model tiers): eco (routine), normal (middle), sport (heavy).
  * Pure and dependency-free so it can be unit-tested in isolation. The default
  * heuristic is zero-cost: no extra LLM call, just a keyword/phrase scan. An
  * optional LLM classifier can be wired in behind a config flag for users who
@@ -8,7 +9,7 @@
  * call per message.
  */
 
-export type Complexity = "routine" | "medium" | "complex"
+export type Complexity = "eco" | "normal" | "sport"
 
 export interface Classification {
   complexity: Complexity
@@ -18,11 +19,11 @@ export interface Classification {
 }
 
 /**
- * Default escalation keywords. A single-word keyword matches its stem
- * (e.g. "debug" also matches "debugging"); a phrase (contains a space or
+ * Default sport-mode escalation keywords. A single-word keyword matches its
+ * stem (e.g. "debug" also matches "debugging"); a phrase (contains a space or
  * non-alphanumeric char) matches as a case-insensitive substring.
  */
-export const DEFAULT_KEYWORDS: string[] = [
+export const DEFAULT_SPORT_KEYWORDS: string[] = [
   // architecture / design
   "architecture",
   "design",
@@ -58,10 +59,10 @@ export const DEFAULT_KEYWORDS: string[] = [
 ]
 
 /**
- * Optional middle-tier keywords. Empty by default, so the classifier is a
- * two-tier (routine/complex) split unless you configure a `medium` tier.
+ * Optional normal-mode keywords. Empty by default, so the classifier is an
+ * eco/sport two-mode split unless you configure a `normal` tier.
  */
-export const DEFAULT_MEDIUM_KEYWORDS: string[] = []
+export const DEFAULT_NORMAL_KEYWORDS: string[] = []
 
 const WORD_RE = /^[a-z0-9]+$/
 
@@ -90,32 +91,32 @@ function matchKeywords(msg: string, keywords: string[]): string[] {
 /**
  * Classify a message with the heuristic keyword scanner.
  *
- * Tiers are checked in priority order: complex first, then medium, then the
- * routine default. Provide `mediumKeywords` to enable a middle tier (useful
+ * Drive modes are checked in priority order: sport first, then normal, then
+ * the eco default. Provide `normalKeywords` to enable a middle tier (useful
  * for three-model setups such as Claude Haiku / Sonnet / Opus).
  *
- * @param text            Raw user message text.
- * @param complexKeywords Keyword list for the complex tier. Defaults to {@link DEFAULT_KEYWORDS}.
- * @param mediumKeywords  Keyword list for the optional medium tier. Defaults to empty.
+ * @param text           Raw user message text.
+ * @param sportKeywords  Keyword list for sport mode. Defaults to {@link DEFAULT_SPORT_KEYWORDS}.
+ * @param normalKeywords Keyword list for the optional normal tier. Defaults to empty.
  */
 export function classifyHeuristic(
   text: string,
-  complexKeywords: string[] = DEFAULT_KEYWORDS,
-  mediumKeywords: string[] = DEFAULT_MEDIUM_KEYWORDS,
+  sportKeywords: string[] = DEFAULT_SPORT_KEYWORDS,
+  normalKeywords: string[] = DEFAULT_NORMAL_KEYWORDS,
 ): Classification {
   const msg = text.toLowerCase().trim()
 
-  const complexMatched = matchKeywords(msg, complexKeywords)
-  if (complexMatched.length > 0) {
-    return { complexity: "complex", matched: complexMatched, source: "heuristic" }
+  const sportMatched = matchKeywords(msg, sportKeywords)
+  if (sportMatched.length > 0) {
+    return { complexity: "sport", matched: sportMatched, source: "heuristic" }
   }
 
-  const mediumMatched = matchKeywords(msg, mediumKeywords)
-  if (mediumMatched.length > 0) {
-    return { complexity: "medium", matched: mediumMatched, source: "heuristic" }
+  const normalMatched = matchKeywords(msg, normalKeywords)
+  if (normalMatched.length > 0) {
+    return { complexity: "normal", matched: normalMatched, source: "heuristic" }
   }
 
-  return { complexity: "routine", matched: [], source: "heuristic" }
+  return { complexity: "eco", matched: [], source: "heuristic" }
 }
 
 /**
@@ -138,7 +139,7 @@ export interface LLMClassifierConfig {
  * when the classifier is misconfigured, the endpoint fails, or the reply is
  * not parseable — the router must never crash or block on classification.
  *
- * The LLM classifier is binary (complex/routine); the `medium` tier is
+ * The LLM classifier is binary (sport/eco); the `normal` tier is
  * heuristic-only.
  */
 export async function classifyLLM(text: string, config: LLMClassifierConfig): Promise<Classification | null> {
@@ -160,11 +161,11 @@ export async function classifyLLM(text: string, config: LLMClassifierConfig): Pr
           {
             role: "system",
             content:
-              'Classify the user request as "complex" or "routine". ' +
-              'Complex: architecture, design, refactoring, debugging, algorithms, ' +
-              'migrations, security, performance, multi-file or non-trivial work. ' +
-              'Routine: small, single-purpose edits or questions. ' +
-              'Reply with exactly one word: complex or routine.',
+              'Classify the user request as "sport" or "eco". ' +
+              "Sport: architecture, design, refactoring, debugging, algorithms, " +
+              "migrations, security, performance, multi-file or non-trivial work. " +
+              "Eco: small, single-purpose edits or questions. " +
+              "Reply with exactly one word: sport or eco.",
           },
           { role: "user", content: text },
         ],
@@ -178,11 +179,11 @@ export async function classifyLLM(text: string, config: LLMClassifierConfig): Pr
     }
     const reply = (data.choices?.[0]?.message?.content ?? "").toLowerCase().trim()
 
-    if (reply.includes("complex")) {
-      return { complexity: "complex", matched: [], source: "llm" }
+    if (reply.includes("sport")) {
+      return { complexity: "sport", matched: [], source: "llm" }
     }
-    if (reply.includes("routine")) {
-      return { complexity: "routine", matched: [], source: "llm" }
+    if (reply.includes("eco")) {
+      return { complexity: "eco", matched: [], source: "llm" }
     }
     return null
   } catch {

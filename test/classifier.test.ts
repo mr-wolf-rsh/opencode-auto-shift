@@ -1,41 +1,41 @@
 import { describe, expect, it } from "vitest"
-import { classifyHeuristic, DEFAULT_KEYWORDS } from "../src/classifier.js"
+import { classifyHeuristic, DEFAULT_SPORT_KEYWORDS } from "../src/classifier.js"
 
 describe("classifyHeuristic", () => {
-  it("routes routine messages to routine", () => {
-    expect(classifyHeuristic("what does git status do").complexity).toBe("routine")
-    expect(classifyHeuristic("add a comment to this function").complexity).toBe("routine")
-    expect(classifyHeuristic("run the tests please").complexity).toBe("routine")
-    expect(classifyHeuristic("").complexity).toBe("routine")
+  it("routes eco messages to eco", () => {
+    expect(classifyHeuristic("what does git status do").complexity).toBe("eco")
+    expect(classifyHeuristic("add a comment to this function").complexity).toBe("eco")
+    expect(classifyHeuristic("run the tests please").complexity).toBe("eco")
+    expect(classifyHeuristic("").complexity).toBe("eco")
   })
 
-  it("escalates single-word complex keywords", () => {
-    expect(classifyHeuristic("debug this flaky test").complexity).toBe("complex")
-    expect(classifyHeuristic("refactor the auth module").complexity).toBe("complex")
-    expect(classifyHeuristic("design a schema for user profiles").complexity).toBe("complex")
-    expect(classifyHeuristic("there is a security issue here").complexity).toBe("complex")
-    expect(classifyHeuristic("optimize this query").complexity).toBe("complex")
+  it("escalates single-word sport keywords", () => {
+    expect(classifyHeuristic("debug this flaky test").complexity).toBe("sport")
+    expect(classifyHeuristic("refactor the auth module").complexity).toBe("sport")
+    expect(classifyHeuristic("design a schema for user profiles").complexity).toBe("sport")
+    expect(classifyHeuristic("there is a security issue here").complexity).toBe("sport")
+    expect(classifyHeuristic("optimize this query").complexity).toBe("sport")
   })
 
   it("escalates phrase keywords", () => {
-    expect(classifyHeuristic("why does this migration fail?").complexity).toBe("complex")
-    expect(classifyHeuristic("how does the session store work?").complexity).toBe("complex")
-    expect(classifyHeuristic("this touches 2+ files").complexity).toBe("complex")
-    expect(classifyHeuristic("implement it from scratch").complexity).toBe("complex")
+    expect(classifyHeuristic("why does this migration fail?").complexity).toBe("sport")
+    expect(classifyHeuristic("how does the session store work?").complexity).toBe("sport")
+    expect(classifyHeuristic("this touches 2+ files").complexity).toBe("sport")
+    expect(classifyHeuristic("implement it from scratch").complexity).toBe("sport")
   })
 
   it("matches word stems (debug -> debugging)", () => {
-    expect(classifyHeuristic("help debugging a crash").complexity).toBe("complex")
-    expect(classifyHeuristic("start refactoring the API").complexity).toBe("complex")
+    expect(classifyHeuristic("help debugging a crash").complexity).toBe("sport")
+    expect(classifyHeuristic("start refactoring the API").complexity).toBe("sport")
   })
 
   it("is case insensitive", () => {
-    expect(classifyHeuristic("REFACTOR this now").complexity).toBe("complex")
+    expect(classifyHeuristic("REFACTOR this now").complexity).toBe("sport")
   })
 
   it("reports the matched keywords", () => {
     const result = classifyHeuristic("please refactor the debug logic")
-    expect(result.complexity).toBe("complex")
+    expect(result.complexity).toBe("sport")
     expect(result.matched).toContain("refactor")
     expect(result.matched).toContain("debug")
     expect(result.source).toBe("heuristic")
@@ -43,29 +43,29 @@ describe("classifyHeuristic", () => {
 
   it("uses word boundaries so 'run' does not match 'running'", () => {
     // No "run" keyword by default; guard against accidental substring matches.
-    expect(classifyHeuristic("the running total", ["run"]).complexity).toBe("complex")
+    expect(classifyHeuristic("the running total", ["run"]).complexity).toBe("sport")
   })
 
   it("supports custom keywords", () => {
-    expect(classifyHeuristic("sprinkle confetti", ["confetti"]).complexity).toBe("complex")
-    expect(classifyHeuristic("do the thing", ["confetti"]).complexity).toBe("routine")
+    expect(classifyHeuristic("sprinkle confetti", ["confetti"]).complexity).toBe("sport")
+    expect(classifyHeuristic("do the thing", ["confetti"]).complexity).toBe("eco")
   })
 
-  it("supports an optional medium tier", () => {
+  it("supports an optional normal tier", () => {
     const result = classifyHeuristic("deploy to staging", [], ["deploy"])
-    expect(result.complexity).toBe("medium")
+    expect(result.complexity).toBe("normal")
     expect(result.matched).toContain("deploy")
   })
 
-  it("prioritizes complex over medium", () => {
-    expect(classifyHeuristic("debug the deploy pipeline", ["debug"], ["deploy"]).complexity).toBe("complex")
+  it("prioritizes sport over normal", () => {
+    expect(classifyHeuristic("debug the deploy pipeline", ["debug"], ["deploy"]).complexity).toBe("sport")
   })
 
-  it("falls back to routine when medium keywords don't match", () => {
-    expect(classifyHeuristic("say hello", [], ["deploy"]).complexity).toBe("routine")
+  it("falls back to eco when normal keywords don't match", () => {
+    expect(classifyHeuristic("say hello", [], ["deploy"]).complexity).toBe("eco")
   })
 
-  it("ships a non-empty default keyword list", () => {
-    expect(DEFAULT_KEYWORDS.length).toBeGreaterThan(0)
+  it("ships a non-empty default sport keyword list", () => {
+    expect(DEFAULT_SPORT_KEYWORDS.length).toBeGreaterThan(0)
   })
 })

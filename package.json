@@ -1,7 +1,7 @@
 {
-  "name": "opencode-model-router",
+  "name": "opencode-auto-shift",
   "version": "0.1.0",
-  "description": "Automatic model + reasoning-effort routing for OpenCode (DeepSeek Flash/Pro)",
+  "description": "An automatic gearbox for your OpenCode models — eco/normal/sport drive modes, auto-shift reasoning effort per message, zero extra LLM cost",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -20,7 +20,9 @@
   "keywords": [
     "opencode",
     "plugin",
-    "model-router",
+    "model-routing",
+    "auto-shift",
+    "gears",
     "deepseek",
     "reasoning-effort",
     "mcp"

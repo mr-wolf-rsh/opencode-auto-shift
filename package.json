@@ -1,6 +1,6 @@
 {
   "name": "opencode-auto-shift",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "An automatic gearbox for your OpenCode models — eco/normal/sport drive modes, auto-shift reasoning effort per message, zero extra LLM cost",
   "repository": {
     "type": "git",
@@ -8,16 +8,21 @@
   },
   "type": "module",
   "license": "MIT",
+  "main": "./dist/index.js",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
   },
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "files": [
+    "dist",
     "src",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

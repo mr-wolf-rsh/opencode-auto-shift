@@ -238,12 +238,50 @@ is illustrative, not a contract — check your provider's docs:
 |---|---|
 | DeepSeek (thinking mode) | `low`, `high`, `max` — see [DeepSeek effort control](https://api-docs.deepseek.com/guides/thinking_mode/#thinking-mode-toggle-and-effort-control) |
 | Claude / Anthropic | `low`, `medium`, `high`, `xhigh`, `max` — see [Claude effort levels](https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels) |
+| xAI (Grok) | `low`, `medium`, `high` — supported values vary per Grok model |
+| OpenAI (reasoning models) | `none` through `max` (e.g. `low`, `medium`, `high`) |
 
 There is no universal default gear table because the vocabulary differs per provider. A
 provider like DeepSeek has no `medium` — so a three-gear DeepSeek table is
 `{ "1": "low", "2": "high", "3": "max" }`, while Claude can use
 `{ "1": "low", "2": "medium", "3": "high" }`. Configure the gear table (and `shifts`) to
 match the models you actually run.
+
+### Provider compatibility
+
+Effort injection depends on two independent things — the **injection key** (does the plugin know
+where to put the value?) and the **gear values** (what your provider accepts). The injection key is
+resolved from the AI SDK package your provider uses (`model.api.npm`), via the map in
+`src/effort.ts`:
+
+| Provider | AI SDK package | Effort key | Status |
+|---|---|---|---|
+| OpenAI | `@ai-sdk/openai` | `reasoningEffort` | ✅ auto |
+| Anthropic (Claude) | `@ai-sdk/anthropic` | `reasoningEffort` | ✅ auto |
+| DeepSeek | `@ai-sdk/deepseek` | `reasoningEffort` | ✅ auto |
+| xAI (Grok) | `@ai-sdk/xai` | `reasoningEffort` | ✅ auto |
+| Groq | `@ai-sdk/groq` | `reasoningEffort` | ✅ auto |
+| Mistral | `@ai-sdk/mistral` | `reasoningEffort` | ✅ auto |
+| Perplexity | `@ai-sdk/perplexity` | `reasoningEffort` | ✅ auto |
+| OpenRouter | `@ai-sdk/openrouter` | `reasoningEffort` | ✅ auto |
+| Fireworks | `@ai-sdk/fireworks` | `reasoningEffort` | ✅ auto |
+| Cerebras | `@ai-sdk/cerebras` | `reasoningEffort` | ✅ auto |
+| DeepInfra | `@ai-sdk/deepinfra` | `reasoningEffort` | ✅ auto |
+| Together AI | `@ai-sdk/togetherai` | `reasoningEffort` | ✅ auto |
+| Azure OpenAI | `@ai-sdk/azure` | `reasoningEffort` | ✅ auto |
+| OpenAI-compatible (any) | `@ai-sdk/openai-compatible` | `reasoningEffort` | ✅ auto |
+| Google (Gemini) | `@ai-sdk/google` | `thinkingConfig.thinkingLevel` | ⚠️ not mapped |
+| Google Vertex | `@ai-sdk/google-vertex` | `thinkingConfig.thinkingLevel` | ⚠️ not mapped |
+| Amazon Bedrock | `@ai-sdk/amazon-bedrock` | `reasoningConfig.budgetTokens` | ⚠️ not mapped |
+
+The ⚠️ providers use a *different* reasoning mechanism — a nested object or a numeric token budget,
+not a flat effort string — so the plugin's string-based `reasoningEffort` injection would be a
+silent no-op for them. `gears.key` cannot fix this (it only renames the flat key, not reshape the
+value); supporting them would mean extending `effort.ts` *and* the injection shape in `index.ts`.
+
+This mapping is enforced by `test/effort.test.ts`, which asserts `reasoningEffort` for every ✅
+package and `undefined` for the ⚠️ ones — so the table cannot drift from the code without a test
+failing.
 
 ### Built-in sport-mode keywords
 

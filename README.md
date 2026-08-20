@@ -350,8 +350,11 @@ Alternatively, flip the config flag and restart:
 - **Gear routing needs a `gears` table**: with no configured gear table, the plugin injects no
   effort (there is no universal default, since effort vocabulary is provider-specific). Set
   `"gears": false` to disable gear routing explicitly if you only want the tools.
-- **Provider-specific effort keys**: only OpenAI-compatible reasoning providers are mapped by
-  default. Override with `gears.key` for other providers, or extend the map in `src/effort.ts`.
+- **Provider-specific effort keys**: the built-in map (`src/effort.ts`) resolves `reasoningEffort`
+  for OpenAI, Anthropic, DeepSeek, xAI/Grok, Groq, Mistral, Perplexity, OpenRouter, and the
+  OpenAI-compatible providers. Providers with a *different* reasoning mechanism (Google/Vertex
+  uses `thinkingConfig.thinkingLevel`; Amazon Bedrock uses `reasoningConfig`) are not mapped —
+  override with `gears.key` for those, or extend the map in `src/effort.ts`.
 - **`set_gear` is sticky, in-memory**: a forced gear applies for the rest of the session until
   cleared (`set_gear(auto=true)`); it does not persist across restarts.
 - **Heuristic false positives/negatives**: keyword matching is cheap, not perfect. Tune

@@ -1,7 +1,7 @@
 /**
  * Message complexity classifier.
  *
- * Drive modes (model tiers): eco (routine), normal (middle), sport (heavy).
+ * Drive modes (model tiers): eco (fast), normal (medium), sport (heavy).
  * Pure and dependency-free so it can be unit-tested in isolation. The default
  * heuristic is zero-cost: no extra LLM call, just a keyword/phrase scan. An
  * optional LLM classifier can be wired in behind a config flag for users who

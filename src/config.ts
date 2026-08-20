@@ -7,6 +7,7 @@ import { DEFAULT_SPORT_KEYWORDS, type LLMClassifierConfig } from "./classifier.j
  * ```json
  * ["opencode-auto-shift", {
  *   "eco": "provider/eco-model",
+ *   "normal": "provider/normal-model",
  *   "sport": "provider/sport-model",
  *   "sport_keywords": ["architecture", "refactor"],
  *   "gears": { "sport": "high", "eco": "low" }
@@ -21,7 +22,12 @@ export interface AutoShiftConfig {
    * lowers effort on whatever model is active rather than switching to it.
    */
   eco?: string
-  /** Sport/escalation model (`provider/model`), used by the `shift` tool. */
+  /**
+   * Normal/middle model (`provider/model`), used by the `switch_mode` tool.
+   * Optional: leave unset for two-mode (eco/sport) setups.
+   */
+  normal?: string
+  /** Sport/escalation model (`provider/model`), used by the `switch_mode` tool. */
   sport?: string
   /** Extra sport-mode escalation keywords, merged with the built-in defaults. */
   sport_keywords?: string[]
@@ -61,6 +67,7 @@ export interface GearsConfig {
 export interface NormalizedConfig {
   enabled: boolean
   ecoModel: string
+  normalModel: string
   sportModel: string
   sportKeywords: string[]
   normalKeywords: string[]
@@ -84,6 +91,7 @@ export function normalizeConfig(input: unknown): NormalizedConfig {
   return {
     enabled: raw.enabled ?? true,
     ecoModel: raw.eco ?? "",
+    normalModel: raw.normal ?? "",
     sportModel: raw.sport ?? "",
     sportKeywords: [...DEFAULT_SPORT_KEYWORDS, ...(raw.sport_keywords ?? [])],
     normalKeywords: [...(raw.normal_keywords ?? [])],

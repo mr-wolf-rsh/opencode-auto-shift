@@ -19,17 +19,17 @@ import { effortKeyFor } from "./effort.js"
 /**
  * opencode-auto-shift plugin entry — an automatic gearbox for your models.
  *
- * Drive modes (model tiers): eco (routine), normal (middle), sport (heavy).
+ * Drive modes (model tiers): eco (fast), normal (medium), sport (heavy) — each
+ * mode maps to a concrete model (e.g. haiku / sonnet / opus, or flash / pro).
  * Gears (reasoning effort) are shifted automatically per message via the
  * `chat.params` hook: sport messages get high effort, eco messages low (and,
  * when configured, normal messages medium).
  *
  * What it does on demand (via tools exposed to the model):
- *   - `shift`: re-send a prompt to a specific model (per-prompt model override
- *     relay) — upshift to sport mode when the current model isn't enough.
- *     opencode's plugin API has no hook to change the model of an in-flight
- *     message, so model changes are either manual (F2 / /model) or driven
- *     through this relay tool.
+ *   - `switch_mode`: re-send a prompt on a different drive mode (eco/normal/
+ *     sport) — a per-prompt model override relay. opencode's plugin API has no
+ *     hook to change the model of an in-flight message, so model changes are
+ *     either manual (F2 / /model) or driven through this relay tool.
  *   - `mcp_toggle`: connect/disconnect an MCP server at runtime.
  */
 const server: Plugin = async (input, options) => {
@@ -75,31 +75,45 @@ const server: Plugin = async (input, options) => {
     },
 
     tool: {
-      shift: tool({
+      switch_mode: tool({
         description:
-          "Shift up a gear: route a prompt to a stronger (sport) model by sending it as a new " +
-          "message with a model override. Use this to escalate a complex task when the current " +
-          "model is insufficient.",
+          "Switch drive mode: route a prompt to a different tier model by sending it as a new " +
+          "message with a model override. Modes map to the configured model slots (eco / normal / " +
+          "sport). Defaults to sport (heavy escalation) when the current model is insufficient.",
         args: {
           prompt: tool.schema.string().describe("The prompt text to send to the target model."),
+          mode: tool.schema
+            .enum(["eco", "normal", "sport"])
+            .optional()
+            .describe("Drive mode (model tier) to switch to. Defaults to sport."),
           model: tool.schema
             .string()
             .optional()
-            .describe("Target model as 'provider/model'. Defaults to the configured sport model."),
+            .describe("Explicit target model as 'provider/model'. Overrides `mode`."),
         },
         async execute(args, ctx) {
-          const target = args.model ?? cfg.sportModel
+          const target =
+            args.model ??
+            (args.mode === "normal"
+              ? cfg.normalModel
+              : args.mode === "eco"
+                ? cfg.ecoModel
+                : cfg.sportModel)
           if (!target) {
             return {
-              title: "shift",
-              output: "No target model configured. Pass a `model` argument or set `sport` in the plugin options.",
+              title: "switch_mode",
+              output:
+                "No target model configured. Pass a `model` argument or set the matching model slot (eco/normal/sport) in the plugin options.",
             }
           }
           const slash = target.indexOf("/")
           const providerID = slash >= 0 ? target.slice(0, slash) : ""
           const modelID = slash >= 0 ? target.slice(slash + 1) : ""
           if (!providerID || !modelID) {
-            return { title: "shift", output: `Invalid model specifier "${target}" (expected provider/model)` }
+            return {
+              title: "switch_mode",
+              output: `Invalid model specifier "${target}" (expected provider/model)`,
+            }
           }
           try {
             await client.session.prompt({
@@ -109,9 +123,9 @@ const server: Plugin = async (input, options) => {
                 parts: [{ type: "text", text: args.prompt }],
               },
             })
-            return { title: "shift", output: `Shifted to ${target}` }
+            return { title: "switch_mode", output: `Switched to ${target}` }
           } catch (error) {
-            return { title: "shift", output: `Failed to shift to ${target}: ${String(error)}` }
+            return { title: "switch_mode", output: `Failed to switch to ${target}: ${String(error)}` }
           }
         },
       }),

@@ -6,17 +6,24 @@ Every message gets the right **drive mode** and the right **gear** — automatic
 stays in **eco**, heavy lifting shifts into **sport**, and a **normal** middle tier slots in when
 you have three models. The shifting is done by a zero-cost keyword heuristic: no extra LLM call, no
 system-prompt overhead, just the right reasoning effort dialed in before the model starts. When you
-need more power, the model itself can upshift (`shift` tool) or pull into the pits to swap MCP
+need more power, you can switch drive modes (`switch_mode` tool) or pull into the pits to swap MCP
 servers (`mcp_toggle`).
+
+Built for OpenCode today; the classifier core is agent-agnostic and portable — see
+[Backlog](#backlog) for Claude Code, Cursor, Windsurf, OpenClaw, Grok, and more.
 
 ## The metaphor
 
+Drive modes are **model tiers** — each mode is a concrete model. Gears are the **reasoning effort**
+the model spends on a message. The automatic gearbox (the heuristic classifier) shifts the gears
+for you; the drive-mode selector lets you pick the model yourself.
+
 | In a car | In opencode-auto-shift |
 |---|---|
-| Drive modes: eco / normal / sport | Model tiers: cheap / middle / heavy |
-| Gears | Reasoning effort (low / medium / high) |
-| Automatic transmission | The heuristic classifier — shifts for you, every message |
-| Paddle shift / kickdown | The `shift` tool — upshift to a stronger model on demand |
+| Drive modes: eco / normal / sport | Model tiers: fast / medium / heavy — each mode maps to whatever model you configure (e.g. haiku / sonnet / opus, or flash / pro) |
+| Gears | Reasoning effort — passed through verbatim; the values your provider accepts (e.g. DeepSeek: low/high/max; Claude: low/medium/high/xhigh/max) |
+| Automatic transmission | The heuristic classifier — shifts gears (effort) for you, every message |
+| Drive-mode selector / paddle | The `switch_mode` tool — change drive mode (model) on demand |
 | Pit stop | `mcp_toggle` — swap MCP servers at runtime |
 
 ## Why this exists
@@ -47,7 +54,7 @@ tokens to save tokens would defeat the entire point.
 |---|---|---|---|
 | Gear shifting (reasoning effort) | `chat.params` hook → `options.reasoningEffort` | ✅ per message | zero |
 | MCP enable/disable | `client.mcp.connect` / `disconnect` tool | 🔧 on demand | zero |
-| Model escalation | `shift` tool → `client.session.prompt` model override | 🔧 on demand | zero |
+| Drive-mode switch (model) | `switch_mode` tool → `client.session.prompt` model override | 🔧 on demand | zero |
 | LLM classifier | optional tiny classification call | ✅ when enabled | ~1 small call/message |
 
 ### Why model routing is not fully automatic
@@ -68,7 +75,7 @@ when the plugin *owns* the prompt — not for transparently re-routing a message
 
 - **Gears (reasoning effort)** are shifted automatically and instantly (the core zero-cost win).
 - **Model changes** are either manual (`F2` cycles recent models, `/model` picks one) or driven by
-  the `shift` tool when a model decides a task needs escalation.
+  the `switch_mode` tool when a model decides a task needs a different drive mode.
 
 If OpenCode later exposes a model-selection hook, this plugin will adopt it for fully automatic
 model routing. Until then, the heuristic classifier + gear shifting get you most of the value
@@ -86,6 +93,7 @@ without any per-message model swap.
      "plugin": [
        ["opencode-auto-shift", {
          "eco": "provider/eco-model",
+         "normal": "provider/normal-model",
          "sport": "provider/sport-model",
          "gears": { "sport": "high", "eco": "low" }
        }]
@@ -93,15 +101,48 @@ without any per-message model swap.
    }
    ```
 
-   For example, a DeepSeek Flash/Pro split:
+   For example, a DeepSeek Flash/Pro split (fast and medium both run on Flash; effort
+   differentiates them — see [gear values](#gear-values-are-provider-specific--examples)):
 
    ```json
    ["opencode-auto-shift", {
      "eco": "deepseek/deepseek-v4-flash",
+     "normal": "deepseek/deepseek-v4-flash",
      "sport": "deepseek/deepseek-v4-pro",
-     "gears": { "sport": "high", "eco": "low" }
+     "gears": { "eco": "low", "normal": "high", "sport": "max" }
    }]
    ```
+
+   The same shape works for **any** provider — a three-model Claude setup:
+
+   ```json
+   ["opencode-auto-shift", {
+     "eco": "anthropic/claude-haiku-4-5",
+     "normal": "anthropic/claude-sonnet-4-5",
+     "sport": "anthropic/claude-opus-4-6",
+     "gears": { "eco": "low", "normal": "medium", "sport": "max" }
+   }]
+   ```
+
+   Two-model OpenAI and Google setups:
+
+   ```json
+   ["opencode-auto-shift", {
+     "eco": "openai/gpt-5-nano",
+     "sport": "openai/gpt-5",
+     "gears": { "eco": "low", "sport": "high" }
+   }]
+   ```
+
+   ```json
+   ["opencode-auto-shift", {
+     "eco": "google/gemini-2.5-flash",
+     "sport": "google/gemini-2.5-pro",
+     "gears": { "eco": "low", "sport": "high" }
+   }]
+   ```
+
+   These are just examples — the plugin never constrains which models or providers you run.
 
 2. Restart OpenCode (or run `/plugin` to load it). The plugin is a no-op until configured with a
    `gears` block and/or used via its tools.
@@ -115,10 +156,11 @@ without any per-message model swap.
   // Master kill switch. false = complete no-op.
   "enabled": true,
 
-  // Your eco and sport models (provider/model). `sport` is used by the
-  // `shift` tool; `eco` documents your baseline (the plugin lowers effort on
-  // whatever model is active).
+  // Drive modes = model tiers. Each mode is a concrete model (provider/model).
+  // `sport` is used by the `switch_mode` tool; `eco` documents your baseline
+  // (the plugin lowers effort on whatever model is active).
   "eco": "provider/eco-model",
+  "normal": "provider/normal-model", // optional — 3-mode setups only
   "sport": "provider/sport-model",
 
   // Extra sport-mode escalation keywords (merged with the built-in defaults).
@@ -138,6 +180,7 @@ without any per-message model swap.
   },
 
   // Gear (reasoning-effort) routing. Set to false to disable entirely.
+  // Gear values are provider-specific — see "Provider effort levels" below.
   "gears": {
     "enabled": true,
     "sport": "high",
@@ -152,6 +195,21 @@ without any per-message model swap.
   "debug": false
 }]
 ```
+
+### Gear values are provider-specific — examples
+
+The plugin is model- and provider-agnostic: gear values are **passed through verbatim** to the
+active provider, never validated or rewritten. Pick values your provider supports. The table below
+is illustrative, not a contract — check your provider's docs:
+
+| Provider | Example effort levels |
+|---|---|
+| DeepSeek (thinking mode) | `low`, `high`, `max` — see [DeepSeek effort control](https://api-docs.deepseek.com/guides/thinking_mode/#thinking-mode-toggle-and-effort-control) |
+| Claude / Anthropic | `low`, `medium`, `high`, `xhigh`, `max` — see [Claude effort levels](https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels) |
+
+The built-in defaults (`low` / `medium` / `high`) are generic vocabulary that Claude accepts. A
+provider like DeepSeek has no `medium` — for a 3-mode DeepSeek setup use `"eco": "low"`,
+`"normal": "high"`, `"sport": "max"`.
 
 ### Built-in sport-mode keywords
 
@@ -222,7 +280,7 @@ Alternatively, flip the config flag and restart:
   default. Override with `gears.key` for other providers, or extend the map in `src/effort.ts`.
 - **Heuristic false positives/negatives**: keyword matching is cheap, not perfect. Tune
   `sport_keywords` or enable the LLM classifier for higher precision.
-- **`shift`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands — they are
+- **`switch_mode`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands — they are
   invoked by the model (or via an agent that calls them), not typed by you directly.
 - **The LLM classifier is binary** (`sport`/`eco`); the `normal` tier is heuristic-only.
 
@@ -234,10 +292,11 @@ Ideas for the future — not implemented yet.
 
 - **Agent-agnostic support** — the classifier (`src/classifier.ts`) is already dependency-free
   and portable. A future version could extract it into a shared core package with thin per-agent
-  adapters (Claude Code, Cursor, Windsurf, …) so the same routing logic works across agents. Each
-  adapter would plug into that agent's own extension API, so capabilities would vary per agent.
+  adapters — Claude Code, Cursor, Windsurf, OpenClaw, Grok, or any agent with an extension API —
+  so the same routing logic works across agents. Each adapter would plug into that agent's own
+  extension API, so capabilities would vary per agent.
 - **Fully automatic model routing** — adopt a model-selection hook if OpenCode ever exposes one,
-  removing the current manual (`F2` / `/model`) or relay (`shift` tool) model-switch step.
+  removing the current manual (`F2` / `/model`) or relay (`switch_mode` tool) model-switch step.
 
 ---
 

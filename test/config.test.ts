@@ -20,6 +20,13 @@ describe("normalizeConfig", () => {
     expect(cfg.sportModel).toBe("openai/gpt-5")
   })
 
+  it("reads the normal model slot (3-mode setups)", () => {
+    const cfg = normalizeConfig({ eco: "a/x", normal: "b/y", sport: "c/z" })
+    expect(cfg.ecoModel).toBe("a/x")
+    expect(cfg.normalModel).toBe("b/y")
+    expect(cfg.sportModel).toBe("c/z")
+  })
+
   it("merges custom sport keywords with the built-in defaults", () => {
     const cfg = normalizeConfig({ sport_keywords: ["kubernetes"] })
     expect(cfg.sportKeywords).toContain("kubernetes")

@@ -198,10 +198,13 @@ without any per-message model swap.
   },
 
   // The automatic shift program: classifier complexity -> gear position.
-  // eco/normal/sport are the classifier's output tiers; the numbers point
-  // into the `gears` table above. Defaults to { eco: 1, normal: 2, sport: 3 }.
-  // Set any tier to any gear — e.g. "sport": 1 runs the sport model at low
-  // effort (allowed, just unusual).
+  // The KEYS (eco/normal/sport) are the classifier's output tiers. Each VALUE
+  // is a gear NUMBER — an index into the `gears` table above, NOT the effort
+  // itself. The effort that actually gets injected is whatever `gears[number]`
+  // holds. Any tier may point at any gear. Defaults to { eco: 1, normal: 2,
+  // sport: 3 } — but only for tiers you leave out; yours always wins.
+  // Example: set "sport": 2 to run sport at gear 2 instead of 3, skipping the
+  // max-effort gear to save cost.
   "shifts": { "eco": 1, "normal": 2, "sport": 3 },
 
   // Extra sport-mode escalation keywords (merged with the built-in defaults).
@@ -273,6 +276,35 @@ There is no built-in `normal` keyword list — it starts empty. Provide your own
 The effort value is injected only when the active model is **reasoning-capable** and its provider
 uses a known `reasoningEffort` key (all OpenAI-compatible providers, and several others). This
 mirrors the same `options` path OpenCode's own variant computation uses.
+
+### How `shifts` + `gears` resolve (worked example)
+
+The classifier tier is **not** the effort, and the gear number is **not** the effort either.
+A message resolves in two hops: tier → gear (via `shifts`), then gear → effort (via `gears`).
+
+Given:
+
+```json
+"gears":  { "1": "low", "2": "high", "3": "max" },
+"shifts": { "eco": 1, "normal": 2, "sport": 3 }
+```
+
+| Classifier tier | `shifts` → gear | `gears[gear]` → effort |
+|---|---|---|
+| `eco` | 1 | `low` |
+| `normal` | 2 | `high` |
+| `sport` | 3 | `max` |
+
+To run sport cheaper — skipping the max-effort gear — point it at gear 2 instead:
+
+```json
+"shifts": { "eco": 1, "normal": 2, "sport": 2 }
+```
+
+Now `sport` resolves to gear 2 → `high`, not `max`. The classifier still says "sport"; only the
+gear it engages changed. The two maps are independent: edit `gears` to redefine what a gear
+*means* (e.g. `"2": "medium"`), or edit `shifts` to redefine which gear a tier *engages* — neither
+edit touches the other, and neither forces sport onto max.
 
 ### Manual gear override
 

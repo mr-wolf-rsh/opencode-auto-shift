@@ -1,6 +1,6 @@
 {
   "name": "opencode-auto-shift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An automatic gearbox for your OpenCode models — eco/normal/sport drive modes, auto-shift reasoning effort per message, zero extra LLM cost",
   "repository": {
     "type": "git",

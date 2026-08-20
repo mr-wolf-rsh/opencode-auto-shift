@@ -10,9 +10,11 @@ import {
 } from "./classifier.js"
 import {
   normalizeConfig,
+  resolveEffort,
   type NormalizedConfig,
   type AutoShiftConfig,
   type GearsConfig,
+  type ShiftConfig,
 } from "./config.js"
 import { effortKeyFor } from "./effort.js"
 
@@ -21,20 +23,27 @@ import { effortKeyFor } from "./effort.js"
  *
  * Drive modes (model tiers): eco (fast), normal (medium), sport (heavy) — each
  * mode maps to a concrete model (e.g. haiku / sonnet / opus, or flash / pro).
- * Gears (reasoning effort) are shifted automatically per message via the
- * `chat.params` hook: sport messages get high effort, eco messages low (and,
- * when configured, normal messages medium).
+ * Gears (reasoning effort) are numbered positions ("1", "2", ...) mapped to
+ * provider effort strings. The automatic shift program (`shifts`) picks a gear
+ * per message via the `chat.params` hook: sport -> gear 3, eco -> gear 1, etc.
+ * Modes and gears are independent axes — any model can run at any gear.
  *
  * What it does on demand (via tools exposed to the model):
  *   - `switch_mode`: re-send a prompt on a different drive mode (eco/normal/
  *     sport) — a per-prompt model override relay. opencode's plugin API has no
  *     hook to change the model of an in-flight message, so model changes are
  *     either manual (F2 / /model) or driven through this relay tool.
+ *   - `set_gear`: force a specific gear (reasoning-effort level) for subsequent
+ *     messages, or resume automatic shifting — the manual paddle override.
  *   - `mcp_toggle`: connect/disconnect an MCP server at runtime.
  */
 const server: Plugin = async (input, options) => {
   const cfg = normalizeConfig(options)
   const { client } = input
+
+  // Manual gear override (null = automatic shifting). Sticky across messages
+  // until cleared — like moving a gearbox into manual mode.
+  let forcedGear: number | null = null
 
   async function classify(text: string): Promise<Classification> {
     if (cfg.useLLMClassifier && cfg.llmClassifier) {
@@ -61,17 +70,22 @@ const server: Plugin = async (input, options) => {
       const text = extractText(hookInput.message)
       if (!text) return
 
-      const result = await classify(text)
-      const effort =
-        result.complexity === "sport"
-          ? cfg.gears.sport
-          : result.complexity === "normal"
-            ? cfg.gears.normal
-            : cfg.gears.eco
-      if (!effort) return
+      // A manually forced gear wins over the automatic shift program.
+      if (forcedGear !== null) {
+        const effort = cfg.gears.table[String(forcedGear)]
+        if (effort) {
+          log(`manual -> gear ${forcedGear} (${effort})`)
+          output.options[key] = effort
+        }
+        return
+      }
 
-      log(`${result.complexity} mode -> ${effort} effort (matched: ${result.matched.join(", ") || "none"})`)
-      output.options[key] = effort
+      const result = await classify(text)
+      const resolved = resolveEffort(result.complexity, cfg)
+      if (!resolved) return
+
+      log(`${result.complexity} -> gear ${resolved.gear} (${resolved.effort}) (matched: ${result.matched.join(", ") || "none"})`)
+      output.options[key] = resolved.effort
     },
 
     tool: {
@@ -130,6 +144,46 @@ const server: Plugin = async (input, options) => {
         },
       }),
 
+      set_gear: tool({
+        description:
+          "Force a specific gear (reasoning-effort level) for subsequent messages, or resume " +
+          "automatic shifting. Gears are numbered positions defined in the plugin's `gears` config " +
+          "table (e.g. 1 = low effort, 3 = max). Forcing a gear is like moving the gearbox into " +
+          "manual mode; it stays until cleared with `auto: true`.",
+        args: {
+          gear: tool.schema
+            .number()
+            .optional()
+            .describe("The gear position to force (a key in the `gears` config table)."),
+          auto: tool.schema
+            .boolean()
+            .optional()
+            .describe("Set to `true` to clear any forced gear and resume automatic shifting."),
+        },
+        async execute(args) {
+          if (args.auto === true) {
+            forcedGear = null
+            return { title: "set_gear", output: "Resumed automatic shifting" }
+          }
+          if (args.gear === undefined) {
+            return {
+              title: "set_gear",
+              output: "Provide a `gear` number, or set `auto: true` to resume automatic shifting.",
+            }
+          }
+          const effort = cfg.gears.table[String(args.gear)]
+          if (effort === undefined) {
+            const available = Object.keys(cfg.gears.table).join(", ") || "(none configured)"
+            return {
+              title: "set_gear",
+              output: `Unknown gear ${args.gear}. Configured gears: ${available}`,
+            }
+          }
+          forcedGear = args.gear
+          return { title: "set_gear", output: `Forced gear ${args.gear} (${effort})` }
+        },
+      }),
+
       mcp_toggle: tool({
         description:
           "Connect or disconnect an MCP server at runtime. The `enabled` flag in opencode config only " +
@@ -181,6 +235,7 @@ export {
   DEFAULT_SPORT_KEYWORDS,
   DEFAULT_NORMAL_KEYWORDS,
   normalizeConfig,
+  resolveEffort,
   effortKeyFor,
 }
 export type {
@@ -190,6 +245,7 @@ export type {
   NormalizedConfig,
   AutoShiftConfig,
   GearsConfig,
+  ShiftConfig,
 }
 
 export default {

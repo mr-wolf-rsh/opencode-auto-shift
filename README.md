@@ -6,8 +6,8 @@ Every message gets the right **drive mode** and the right **gear** — automatic
 stays in **eco**, heavy lifting shifts into **sport**, and a **normal** middle tier slots in when
 you have three models. The shifting is done by a zero-cost keyword heuristic: no extra LLM call, no
 system-prompt overhead, just the right reasoning effort dialed in before the model starts. When you
-need more power, you can switch drive modes (`switch_mode` tool) or pull into the pits to swap MCP
-servers (`mcp_toggle`).
+need more power you can switch drive modes (`switch_mode`), force a gear (`set_gear`), or pull into
+the pits to swap MCP servers (`mcp_toggle`).
 
 Built for OpenCode today; the classifier core is agent-agnostic and portable — see
 [Backlog](#backlog) for Claude Code, Cursor, Windsurf, OpenClaw, Grok, and more.
@@ -21,10 +21,16 @@ for you; the drive-mode selector lets you pick the model yourself.
 | In a car | In opencode-auto-shift |
 |---|---|
 | Drive modes: eco / normal / sport | Model tiers: fast / medium / heavy — each mode maps to whatever model you configure (e.g. haiku / sonnet / opus, or flash / pro) |
-| Gears | Reasoning effort — passed through verbatim; the values your provider accepts (e.g. DeepSeek: low/high/max; Claude: low/medium/high/xhigh/max) |
-| Automatic transmission | The heuristic classifier — shifts gears (effort) for you, every message |
-| Drive-mode selector / paddle | The `switch_mode` tool — change drive mode (model) on demand |
+| Gears: 1st, 2nd, 3rd… | Numbered effort positions — each maps to a reasoning-effort string your provider accepts (e.g. DeepSeek: low/high/max; Claude: low/medium/high/xhigh/max) |
+| Automatic transmission | The heuristic classifier + `shifts` program — picks a gear (effort) for you, every message |
+| Manual/paddle mode | The `set_gear` tool — force a gear on demand, or resume automatic shifting |
+| Drive-mode selector | The `switch_mode` tool — change drive mode (model) on demand |
 | Pit stop | `mcp_toggle` — swap MCP servers at runtime |
+
+Modes and gears are **independent axes**: any model can run at any gear. The classifier
+output (eco/normal/sport), the gear table, and the shift program are all configured
+separately — you can run your sport model at 1st gear if you want to (not recommended,
+but fully allowed).
 
 ## Why this exists
 
@@ -52,7 +58,8 @@ tokens to save tokens would defeat the entire point.
 
 | Capability | Mechanism | Automatic? | Cost |
 |---|---|---|---|
-| Gear shifting (reasoning effort) | `chat.params` hook → `options.reasoningEffort` | ✅ per message | zero |
+| Gear shifting (reasoning effort) | `chat.params` hook → `options.reasoningEffort`, via the `shifts` program | ✅ per message | zero |
+| Manual gear override | `set_gear` tool → forces a gear until cleared | 🔧 on demand | zero |
 | MCP enable/disable | `client.mcp.connect` / `disconnect` tool | 🔧 on demand | zero |
 | Drive-mode switch (model) | `switch_mode` tool → `client.session.prompt` model override | 🔧 on demand | zero |
 | LLM classifier | optional tiny classification call | ✅ when enabled | ~1 small call/message |
@@ -92,24 +99,34 @@ without any per-message model swap.
      "$schema": "https://opencode.ai/config.json",
      "plugin": [
        ["opencode-auto-shift", {
-         "eco": "provider/eco-model",
-         "normal": "provider/normal-model",
-         "sport": "provider/sport-model",
-         "gears": { "sport": "high", "eco": "low" }
+         "modes": {
+           "eco": "provider/eco-model",
+           "normal": "provider/normal-model",
+           "sport": "provider/sport-model"
+         },
+         "gears": { "1": "low", "2": "high", "3": "max" },
+         "shifts": { "eco": 1, "normal": 2, "sport": 3 }
        }]
      ]
    }
    ```
 
-   For example, a DeepSeek Flash/Pro split (fast and medium both run on Flash; effort
+   The three blocks are independent: `modes` map drive modes to models, `gears` map
+   numbered positions to effort strings, and `shifts` map classifier output to a gear
+   position. Any model can run at any gear.
+
+   For example, a DeepSeek Flash/Pro split (eco and normal both run on Flash; effort
    differentiates them — see [gear values](#gear-values-are-provider-specific--examples)):
 
    ```json
    ["opencode-auto-shift", {
-     "eco": "deepseek/deepseek-v4-flash",
-     "normal": "deepseek/deepseek-v4-flash",
-     "sport": "deepseek/deepseek-v4-pro",
-     "gears": { "eco": "low", "normal": "high", "sport": "max" }
+     "modes": {
+       "eco": "deepseek/deepseek-v4-flash",
+       "normal": "deepseek/deepseek-v4-flash",
+       "sport": "deepseek/deepseek-v4-pro"
+     },
+     "gears": { "1": "low", "2": "high", "3": "max" },
+     "shifts": { "eco": 1, "normal": 2, "sport": 3 }
    }]
    ```
 
@@ -117,35 +134,38 @@ without any per-message model swap.
 
    ```json
    ["opencode-auto-shift", {
-     "eco": "anthropic/claude-haiku-4-5",
-     "normal": "anthropic/claude-sonnet-4-5",
-     "sport": "anthropic/claude-opus-4-6",
-     "gears": { "eco": "low", "normal": "medium", "sport": "max" }
+     "modes": {
+       "eco": "anthropic/claude-haiku-4-5",
+       "normal": "anthropic/claude-sonnet-4-5",
+       "sport": "anthropic/claude-opus-4-6"
+     },
+     "gears": { "1": "low", "2": "medium", "3": "high" },
+     "shifts": { "eco": 1, "normal": 2, "sport": 3 }
    }]
    ```
 
-   Two-model OpenAI and Google setups:
+   Two-model OpenAI and Google setups (drop the `normal` mode and third gear):
 
    ```json
    ["opencode-auto-shift", {
-     "eco": "openai/gpt-5-nano",
-     "sport": "openai/gpt-5",
-     "gears": { "eco": "low", "sport": "high" }
+     "modes": { "eco": "openai/gpt-5-nano", "sport": "openai/gpt-5" },
+     "gears": { "1": "low", "2": "high" },
+     "shifts": { "eco": 1, "sport": 2 }
    }]
    ```
 
    ```json
    ["opencode-auto-shift", {
-     "eco": "google/gemini-2.5-flash",
-     "sport": "google/gemini-2.5-pro",
-     "gears": { "eco": "low", "sport": "high" }
+     "modes": { "eco": "google/gemini-2.5-flash", "sport": "google/gemini-2.5-pro" },
+     "gears": { "1": "low", "2": "high" },
+     "shifts": { "eco": 1, "sport": 2 }
    }]
    ```
 
    These are just examples — the plugin never constrains which models or providers you run.
 
-2. Restart OpenCode (or run `/plugin` to load it). The plugin is a no-op until configured with a
-   `gears` block and/or used via its tools.
+2. Restart OpenCode (or run `/plugin` to load it). The plugin injects effort only when a
+   `gears` table is configured and/or you use its tools.
 
 ---
 
@@ -157,11 +177,32 @@ without any per-message model swap.
   "enabled": true,
 
   // Drive modes = model tiers. Each mode is a concrete model (provider/model).
-  // `sport` is used by the `switch_mode` tool; `eco` documents your baseline
-  // (the plugin lowers effort on whatever model is active).
-  "eco": "provider/eco-model",
-  "normal": "provider/normal-model", // optional — 3-mode setups only
-  "sport": "provider/sport-model",
+  // Used by the `switch_mode` tool. Independent of gears — any model can run
+  // at any gear.
+  "modes": {
+    "eco": "provider/eco-model",
+    "normal": "provider/normal-model", // optional — 3-mode setups only
+    "sport": "provider/sport-model"
+  },
+
+  // Numbered gears = reasoning-effort positions. Each maps to a provider
+  // effort string, passed through verbatim. No default table — effort values
+  // are provider-specific. `key` overrides the options key used to set effort
+  // (defaults to a built-in per-provider map). Set the whole block to `false`
+  // to disable gear routing entirely.
+  "gears": {
+    "1": "low",
+    "2": "medium",
+    "3": "high",
+    "key": "reasoningEffort"
+  },
+
+  // The automatic shift program: classifier complexity -> gear position.
+  // eco/normal/sport are the classifier's output tiers; the numbers point
+  // into the `gears` table above. Defaults to { eco: 1, normal: 2, sport: 3 }.
+  // Set any tier to any gear — e.g. "sport": 1 runs the sport model at low
+  // effort (allowed, just unusual).
+  "shifts": { "eco": 1, "normal": 2, "sport": 3 },
 
   // Extra sport-mode escalation keywords (merged with the built-in defaults).
   "sport_keywords": ["architecture", "refactor", "custom-signal"],
@@ -177,18 +218,6 @@ without any per-message model swap.
     "baseUrl": "https://your-provider.example/v1", // any OpenAI-compatible endpoint
     "model": "your-small-model",
     "apiKeyEnv": "YOUR_API_KEY_ENV"
-  },
-
-  // Gear (reasoning-effort) routing. Set to false to disable entirely.
-  // Gear values are provider-specific — see "Provider effort levels" below.
-  "gears": {
-    "enabled": true,
-    "sport": "high",
-    "normal": "medium",
-    "eco": "low",
-    // Optional: override the options key used (defaults to a built-in
-    // per-provider map, e.g. `reasoningEffort` for OpenAI-compatible providers).
-    "key": "reasoningEffort"
   },
 
   // Log routing decisions to stderr.
@@ -207,9 +236,11 @@ is illustrative, not a contract — check your provider's docs:
 | DeepSeek (thinking mode) | `low`, `high`, `max` — see [DeepSeek effort control](https://api-docs.deepseek.com/guides/thinking_mode/#thinking-mode-toggle-and-effort-control) |
 | Claude / Anthropic | `low`, `medium`, `high`, `xhigh`, `max` — see [Claude effort levels](https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels) |
 
-The built-in defaults (`low` / `medium` / `high`) are generic vocabulary that Claude accepts. A
-provider like DeepSeek has no `medium` — for a 3-mode DeepSeek setup use `"eco": "low"`,
-`"normal": "high"`, `"sport": "max"`.
+There is no universal default gear table because the vocabulary differs per provider. A
+provider like DeepSeek has no `medium` — so a three-gear DeepSeek table is
+`{ "1": "low", "2": "high", "3": "max" }`, while Claude can use
+`{ "1": "low", "2": "medium", "3": "high" }`. Configure the gear table (and `shifts`) to
+match the models you actually run.
 
 ### Built-in sport-mode keywords
 
@@ -234,14 +265,25 @@ There is no built-in `normal` keyword list — it starts empty. Provide your own
    `sport`/`eco`; if that call fails or is unavailable, the heuristic runs instead.
 3. Otherwise the heuristic scans for escalation keywords, in priority order: **sport** first,
    then **normal** (only when `normal_keywords` is configured), then **eco** by default.
-4. The result maps to reasoning effort via `gears`:
-   - `sport` → `gears.sport` (default `"high"`)
-   - `normal` → `gears.normal` (default `"medium"`)
-   - `eco` → `gears.eco` (default `"low"`)
+4. Unless a gear was manually forced via `set_gear`, the classifier tier maps to a gear
+   position via the `shifts` program (defaults: `eco` → 1, `normal` → 2, `sport` → 3).
+5. The gear position maps to an effort string via the `gears` table. If the position has no
+   entry, no effort is injected for that message.
 
 The effort value is injected only when the active model is **reasoning-capable** and its provider
 uses a known `reasoningEffort` key (all OpenAI-compatible providers, and several others). This
 mirrors the same `options` path OpenCode's own variant computation uses.
+
+### Manual gear override
+
+`set_gear` moves the gearbox into manual mode: it forces a gear for all subsequent messages
+until you clear it. This is independent of `switch_mode` (which changes the model) — you can
+force a gear, switch drive mode, or both, in any combination.
+
+```
+set_gear(gear=3)      // force gear 3 (max effort) for subsequent messages
+set_gear(auto=true)   // back to automatic shifting
+```
 
 ### Cost tradeoff of the LLM classifier
 
@@ -273,15 +315,17 @@ Alternatively, flip the config flag and restart:
 ## Limitations
 
 - **No automatic per-message model swap** — see "Why model routing is not fully automatic" above.
-- **Gear routing is opt-out, not opt-in**: if the plugin is installed and `gears.enabled` is
-  not set to `false`, it overrides the user's selected reasoning variant for reasoning-capable
-  models. Set `"gears": false` if you only want the tools.
+- **Gear routing needs a `gears` table**: with no configured gear table, the plugin injects no
+  effort (there is no universal default, since effort vocabulary is provider-specific). Set
+  `"gears": false` to disable gear routing explicitly if you only want the tools.
 - **Provider-specific effort keys**: only OpenAI-compatible reasoning providers are mapped by
   default. Override with `gears.key` for other providers, or extend the map in `src/effort.ts`.
+- **`set_gear` is sticky, in-memory**: a forced gear applies for the rest of the session until
+  cleared (`set_gear(auto=true)`); it does not persist across restarts.
 - **Heuristic false positives/negatives**: keyword matching is cheap, not perfect. Tune
   `sport_keywords` or enable the LLM classifier for higher precision.
-- **`switch_mode`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands — they are
-  invoked by the model (or via an agent that calls them), not typed by you directly.
+- **`switch_mode`/`set_gear`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands —
+  they are invoked by the model (or via an agent that calls them), not typed by you directly.
 - **The LLM classifier is binary** (`sport`/`eco`); the `normal` tier is heuristic-only.
 
 ---

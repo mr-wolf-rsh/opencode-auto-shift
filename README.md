@@ -386,9 +386,10 @@ Alternatively, flip the config flag and restart:
   message mutation being persisted and honored at request time (verified on 1.18.x). On older
   versions the hook still fires but the model override is ignored — use `switch_mode` there.
 - **Subagent messages are never auto-routed**: a subagent keeps the model its agent config pins.
-- **Manual model choices are not preserved while auto-routing is on**: every primary-agent message
-  is re-classified, so a manual `F2`/`/model` selection is overridden by the classifier on the next
-  message. Turn `auto_route_models` off when you want full manual control.
+- **`switch_mode` and `/model` overrides are honored**: the `switch_mode` relay is exempt from
+  auto-routing (the hook skips the exact message it sends), so an explicit drive-mode switch sticks
+  instead of being re-classified back. A manual `F2`/`/model` choice on your *next typed* message is
+  still overridden by the classifier while `auto_route_models` is on — that is the feature.
 - **Gear routing needs a `gears` table**: with no configured gear table, the plugin injects no
   effort (there is no universal default, since effort vocabulary is provider-specific). Set
   `"gears": false` to disable gear routing explicitly if you only want the tools.

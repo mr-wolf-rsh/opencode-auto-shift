@@ -17,7 +17,7 @@ import {
   type ShiftConfig,
 } from "./config.js"
 import { effortKeyFor } from "./effort.js"
-import { isSameModel, parseModelSpec, routeTarget } from "./routing.js"
+import { isSameModel, parseModelSpec, routeTarget, type ModelSpec } from "./routing.js"
 
 /**
  * opencode-auto-shift plugin entry — an automatic gearbox for your models.
@@ -46,6 +46,13 @@ const server: Plugin = async (input, options) => {
   // until cleared — like moving a gearbox into manual mode.
   let forcedGear: number | null = null
 
+  // Explicit model switches relayed by the `switch_mode` tool, keyed by session
+  // ID. The auto-route hook honors these: a relayed message carries an explicit
+  // model override, so re-classifying it would bounce the switch back. The
+  // entry lives only for the duration of the relay prompt (set before
+  // `session.prompt`, cleared in `finally`).
+  const pendingSwitches = new Map<string, ModelSpec>()
+
   async function classify(text: string): Promise<Classification> {
     if (cfg.useLLMClassifier && cfg.llmClassifier) {
       const result = await classifyLLM(text, cfg.llmClassifier)
@@ -65,19 +72,35 @@ const server: Plugin = async (input, options) => {
       const text = extractText(output.parts)
       if (!text) return
 
+      // Honor an explicit switch_mode relay: the message was sent with an
+      // explicit model override, so re-classifying it would bounce the switch
+      // back. Skip auto-routing for exactly this message.
+      if (pendingSwitches.has(hookInput.sessionID)) {
+        pendingSwitches.delete(hookInput.sessionID)
+        log(`switch relay honored — auto-route skipped for session ${hookInput.sessionID}`)
+        return
+      }
+
       // Only route messages that belong to a primary agent. Subagent messages
       // (task-tool subtasks) keep their own configured models — auto-routing
       // them would override e.g. an sdd-apply agent pinned to the pro model.
       if (hookInput.agent) {
         try {
-          const res = await fetch(new URL("/agent", serverUrl))
-          if (res.ok) {
-            const agents = (await res.json()) as Array<{ name: string; mode: string }>
-            const agent = agents.find((entry) => entry.name === hookInput.agent)
-            if (agent && agent.mode !== "primary") return
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 2000)
+          try {
+            const res = await fetch(new URL("/agent", serverUrl), { signal: controller.signal })
+            if (res.ok) {
+              const agents = (await res.json()) as Array<{ name: string; mode: string }>
+              const agent = agents.find((entry) => entry.name === hookInput.agent)
+              if (agent && agent.mode !== "primary") return
+            }
+          } finally {
+            clearTimeout(timer)
           }
         } catch {
-          // Agent registry unavailable — proceed without the subagent guard.
+          // Agent registry unavailable or timed out — proceed without the
+          // subagent guard. Never block the message pipeline on this call.
         }
       }
 
@@ -171,6 +194,9 @@ const server: Plugin = async (input, options) => {
             }
           }
           try {
+            // Mark this session as having an explicit switch in flight so the
+            // chat.message hook skips auto-routing for the relayed message.
+            pendingSwitches.set(ctx.sessionID, { providerID, modelID })
             await client.session.prompt({
               path: { id: ctx.sessionID },
               body: {
@@ -181,6 +207,8 @@ const server: Plugin = async (input, options) => {
             return { title: "switch_mode", output: `Switched to ${target}` }
           } catch (error) {
             return { title: "switch_mode", output: `Failed to switch to ${target}: ${String(error)}` }
+          } finally {
+            pendingSwitches.delete(ctx.sessionID)
           }
         },
       }),

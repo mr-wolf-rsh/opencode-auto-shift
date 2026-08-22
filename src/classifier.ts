@@ -147,45 +147,52 @@ export async function classifyLLM(text: string, config: LLMClassifierConfig): Pr
   if (!apiKey) return null
 
   try {
-    const res = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0,
-        max_tokens: 5,
-        messages: [
-          {
-            role: "system",
-            content:
-              'Classify the user request as "sport" or "eco". ' +
-              "Sport: architecture, design, refactoring, debugging, algorithms, " +
-              "migrations, security, performance, multi-file or non-trivial work. " +
-              "Eco: small, single-purpose edits or questions. " +
-              "Reply with exactly one word: sport or eco.",
-          },
-          { role: "user", content: text },
-        ],
-      }),
-    })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    try {
+      const res = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          temperature: 0,
+          max_tokens: 5,
+          messages: [
+            {
+              role: "system",
+              content:
+                'Classify the user request as "sport" or "eco". ' +
+                "Sport: architecture, design, refactoring, debugging, algorithms, " +
+                "migrations, security, performance, multi-file or non-trivial work. " +
+                "Eco: small, single-purpose edits or questions. " +
+                "Reply with exactly one word: sport or eco.",
+            },
+            { role: "user", content: text },
+          ],
+        }),
+        signal: controller.signal,
+      })
 
-    if (!res.ok) return null
+      if (!res.ok) return null
 
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const reply = (data.choices?.[0]?.message?.content ?? "").toLowerCase().trim()
+      const data = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      const reply = (data.choices?.[0]?.message?.content ?? "").toLowerCase().trim()
 
-    if (reply.includes("sport")) {
-      return { complexity: "sport", matched: [], source: "llm" }
+      if (reply.includes("sport")) {
+        return { complexity: "sport", matched: [], source: "llm" }
+      }
+      if (reply.includes("eco")) {
+        return { complexity: "eco", matched: [], source: "llm" }
+      }
+      return null
+    } finally {
+      clearTimeout(timer)
     }
-    if (reply.includes("eco")) {
-      return { complexity: "eco", matched: [], source: "llm" }
-    }
-    return null
   } catch {
     return null
   }

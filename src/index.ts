@@ -17,7 +17,8 @@ import {
   type ShiftConfig,
 } from "./config.js"
 import { effortKeyFor } from "./effort.js"
-import { isSameModel, parseModelSpec, routeTarget, type ModelSpec } from "./routing.js"
+import { PendingSwitchRegistry } from "./relay.js"
+import { isSameModel, parseModelSpec, routeTarget } from "./routing.js"
 
 /**
  * opencode-auto-shift plugin entry — an automatic gearbox for your models.
@@ -49,9 +50,10 @@ const server: Plugin = async (input, options) => {
   // Explicit model switches relayed by the `switch_mode` tool, keyed by session
   // ID. The auto-route hook honors these: a relayed message carries an explicit
   // model override, so re-classifying it would bounce the switch back. The
-  // entry lives only for the duration of the relay prompt (set before
-  // `session.prompt`, cleared in `finally`).
-  const pendingSwitches = new Map<string, ModelSpec>()
+  // entry is consumed by the hook when the relayed message arrives (sessions
+  // process messages serially, so it is always the next message) and is TTL-
+  // bounded so a relay that never arrives cannot suppress routing forever.
+  const pendingSwitches = new PendingSwitchRegistry()
 
   async function classify(text: string): Promise<Classification> {
     if (cfg.useLLMClassifier && cfg.llmClassifier) {
@@ -74,9 +76,10 @@ const server: Plugin = async (input, options) => {
 
       // Honor an explicit switch_mode relay: the message was sent with an
       // explicit model override, so re-classifying it would bounce the switch
-      // back. Skip auto-routing for exactly this message.
-      if (pendingSwitches.has(hookInput.sessionID)) {
-        pendingSwitches.delete(hookInput.sessionID)
+      // back. Skip auto-routing for exactly this message. `take` consumes the
+      // entry (dropping it when the relay expired) so a stale relay can never
+      // exempt a later message from auto-routing.
+      if (pendingSwitches.take(hookInput.sessionID)) {
         log(`switch relay honored — auto-route skipped for session ${hookInput.sessionID}`)
         return
       }
@@ -197,18 +200,36 @@ const server: Plugin = async (input, options) => {
             // Mark this session as having an explicit switch in flight so the
             // chat.message hook skips auto-routing for the relayed message.
             pendingSwitches.set(ctx.sessionID, { providerID, modelID })
-            await client.session.prompt({
-              path: { id: ctx.sessionID },
-              body: {
-                model: { providerID, modelID },
-                parts: [{ type: "text", text: args.prompt }],
-              },
-            })
-            return { title: "switch_mode", output: `Switched to ${target}` }
+
+            const body = {
+              model: { providerID, modelID },
+              parts: [{ type: "text", text: args.prompt }],
+            } satisfies {
+              model: { providerID: string; modelID: string }
+              parts: Array<{ type: "text"; text: string }>
+            }
+            // Fire-and-forget relay. Awaiting the blocking `prompt` endpoint
+            // from inside the current turn deadlocks: the relayed message
+            // queues behind this turn (sessions process messages serially),
+            // and this turn cannot end until the tool returns — a circular
+            // wait that leaves the relayed prompt stuck "queued". `promptAsync`
+            // (or a non-awaited `prompt` on older runtimes) returns once the
+            // message is queued, so the current turn finishes first and the
+            // switch runs right after on the target model.
+            const relay = client.session.promptAsync
+              ? client.session.promptAsync({ path: { id: ctx.sessionID }, body })
+              : client.session.prompt({ path: { id: ctx.sessionID }, body })
+            // The relayed message is consumed by the chat.message hook, which
+            // clears the guard. Clear it here only if the relay never made it
+            // to the server.
+            relay.catch(() => pendingSwitches.clear(ctx.sessionID))
+            return {
+              title: "switch_mode",
+              output: `Switched to ${target} — prompt queued on the ${target} model`,
+            }
           } catch (error) {
+            pendingSwitches.clear(ctx.sessionID)
             return { title: "switch_mode", output: `Failed to switch to ${target}: ${String(error)}` }
-          } finally {
-            pendingSwitches.delete(ctx.sessionID)
           }
         },
       }),

@@ -64,6 +64,7 @@ tokens to save tokens would defeat the entire point.
 | Manual gear override | `set_gear` tool → forces a gear until cleared | 🔧 on demand | zero |
 | MCP enable/disable | `client.mcp.connect` / `disconnect` tool | 🔧 on demand | zero |
 | Drive-mode switch (model) | `switch_mode` tool → `client.session.prompt` model override | 🔧 on demand | zero |
+| Text directives (mode + gear) | Type `!sport`, `go pro`, `!gear 3`, `stay on normal`, `back to auto` at the start of a message → per-message, or sticky until it self-expires | 🔧 on demand | zero |
 | LLM classifier | optional tiny classification call | ✅ when enabled | ~1 small call/message |
 
 ### Model routing is automatic when you opt in

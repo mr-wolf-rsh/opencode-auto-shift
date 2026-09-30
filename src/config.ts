@@ -73,6 +73,21 @@ export interface AutoShiftConfig {
    * gear position in the `gears` table. Defaults to eco=1, normal=2, sport=3.
    */
   shifts?: ShiftConfig
+  /**
+   * Text-directive layer: let the user force a drive mode and/or gear by
+   * typing an override at the start of a message (`!sport`, `go eco`,
+   * `!gear 3`, `stay on normal`, `back to auto`, ...). Provider-agnostic —
+   * directives resolve to abstract mode slots and gear numbers, never model
+   * names.
+   */
+  directives?: {
+    /** Kill switch for the directive layer. Defaults to `true`. */
+    enabled?: boolean
+    /** User messages a sticky override survives. Defaults to `10`. */
+    sticky_turns?: number
+    /** User word -> tier aliases ("eco" | "normal" | "sport"), highest precedence. */
+    aliases?: Record<string, string>
+  }
   /** Log routing decisions to stderr (for debugging the classifier). */
   debug?: boolean
 }
@@ -120,6 +135,11 @@ export interface NormalizedConfig {
     normal: number
     sport: number
   }
+  directives: {
+    enabled: boolean
+    stickyTurns: number
+    modeWords: Map<string, Complexity>
+  }
   debug: boolean
 }
 
@@ -158,6 +178,11 @@ export function normalizeConfig(input: unknown): NormalizedConfig {
       normal: shifts.normal ?? 2,
       sport: shifts.sport ?? 3,
     },
+    directives: {
+      enabled: raw.directives?.enabled ?? true,
+      stickyTurns: raw.directives?.sticky_turns ?? 10,
+      modeWords: deriveModeWords(modes, raw.directives?.aliases),
+    },
     debug: raw.debug ?? false,
   }
 }
@@ -175,4 +200,78 @@ export function resolveEffort(
   const effort = config.gears.table[String(gear)]
   if (effort === undefined) return undefined
   return { gear, effort }
+}
+
+const TIER_ORDER: Record<Complexity, number> = { eco: 0, normal: 1, sport: 2 }
+
+const BUILTIN_MODE_WORDS: Record<Complexity, string[]> = {
+  eco: ["eco", "fast", "lite"],
+  normal: ["normal", "balanced"],
+  sport: ["sport", "heavy"],
+}
+
+const TIERS = ["eco", "normal", "sport"] as const
+
+/**
+ * Build the provider-agnostic word -> tier map used by the directive parser.
+ * Pure. Layering, lowest precedence first (later wins on conflict):
+ *
+ * 1. Built-in abstract words: eco -> {eco,fast,lite}, normal -> {normal,balanced},
+ *    sport -> {sport,heavy}.
+ * 2. Derived from configured model IDs: for each mode with a non-empty model,
+ *    take the substring after the last `/`, split on `-` and `.`, keep alphabetic
+ *    tokens of length >= 2 (dropping version-like tokens). A token is ambiguous
+ *    when it maps to more than one DISTINCT model ID: if those modes share the
+ *    same model ID it maps to the lowest tier (eco < normal < sport), otherwise
+ *    it is dropped.
+ * 3. Explicit `aliases` — values normalized (lowercase; must be eco/normal/sport,
+ *    else the entry is ignored).
+ */
+export function deriveModeWords(
+  modes: { eco?: string; normal?: string; sport?: string },
+  explicit?: Record<string, string>,
+): Map<string, Complexity> {
+  const result = new Map<string, Complexity>()
+
+  for (const tier of TIERS) {
+    for (const word of BUILTIN_MODE_WORDS[tier]) {
+      result.set(word, tier)
+    }
+  }
+
+  const byToken = new Map<string, Array<{ tier: Complexity; modelID: string }>>()
+  for (const tier of TIERS) {
+    const model = modes[tier]
+    if (!model) continue
+    const modelID = model.slice(model.lastIndexOf("/") + 1)
+    for (const raw of modelID.split(/[-.]/)) {
+      const token = raw.toLowerCase()
+      if (!/^[a-z]{2,}$/.test(token)) continue
+      if (/^v?\d/.test(token)) continue
+      const list = byToken.get(token) ?? []
+      list.push({ tier, modelID })
+      byToken.set(token, list)
+    }
+  }
+
+  for (const [token, list] of byToken) {
+    const distinctModels = new Set(list.map((entry) => entry.modelID))
+    if (distinctModels.size > 1) continue
+    const lowest = list.reduce<Complexity>(
+      (acc, entry) => (TIER_ORDER[entry.tier] < TIER_ORDER[acc] ? entry.tier : acc),
+      list[0].tier,
+    )
+    result.set(token, lowest)
+  }
+
+  if (explicit) {
+    for (const [word, value] of Object.entries(explicit)) {
+      const tier = value.trim().toLowerCase() as Complexity
+      if (tier === "eco" || tier === "normal" || tier === "sport") {
+        result.set(word.toLowerCase(), tier)
+      }
+    }
+  }
+
+  return result
 }

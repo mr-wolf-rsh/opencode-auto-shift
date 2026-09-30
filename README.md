@@ -24,6 +24,7 @@ for you; the drive-mode selector lets you pick the model yourself.
 | Gears: 1st, 2nd, 3rd… | Numbered effort positions — each maps to a reasoning-effort string your provider accepts (e.g. DeepSeek: low/high/max; Claude: low/medium/high/xhigh/max) |
 | Automatic transmission | The heuristic classifier + `shifts` program — picks a gear (effort) for you, every message |
 | Manual/paddle mode | The `set_gear` tool — force a gear on demand, or resume automatic shifting |
+| Text directives | Type `!sport`, `go eco`, `!gear 3`, `stay on normal`, or `back to auto` at the start of a message — force a mode/gear per-message, or sticky until it self-expires |
 | Drive-mode selector | The `switch_mode` tool — change drive mode (model) on demand |
 | Pit stop | `mcp_toggle` — swap MCP servers at runtime |
 
@@ -199,6 +200,14 @@ on-demand way to force a model for a prompt.
   // max-effort gear to save cost.
   "shifts": { "eco": 1, "normal": 2, "sport": 3 },
 
+  // Text-directive layer: force a mode/gear by typing at the start of a
+  // message (`!sport`, `go eco`, `!gear 3`, `stay on normal`, `back to auto`).
+  "directives": {
+    "enabled": true,        // kill switch for the directive layer
+    "sticky_turns": 10,     // user messages a sticky override survives
+    "aliases": { "pro": "sport" }  // extra word -> eco|normal|sport (highest precedence)
+  },
+
   // Extra sport-mode escalation keywords (merged with the built-in defaults).
   "sport_keywords": ["architecture", "refactor", "custom-signal"],
 
@@ -353,6 +362,49 @@ set_gear(gear=3)      // force gear 3 (max effort) for subsequent messages
 set_gear(auto=true)   // back to automatic shifting
 ```
 
+### Manual control: directives
+
+You can also drive the gearbox **by typing** — a text directive at the very start of a message
+overrides the automatic routing for that message (or longer, if you ask). Directives are
+**provider-agnostic**: they resolve to abstract mode slots (`eco`/`normal`/`sport`) and gear
+numbers, never to concrete model names — the same directive works no matter which provider's
+models you have configured.
+
+Two forms are recognized, both case-insensitive and anchored to the **start** of the message
+(leading whitespace is fine; mid-message words never trigger):
+
+- **Sigil** — starts with `!`: `!sport`, `!gear 3`, `!stay sport`, `!lock gear 2`, `!auto`.
+- **Natural language** — starts with a verb: `go sport`, `use gear 2`, `switch to normal`,
+  `stay on heavy`, `back to auto`.
+
+| Input | Effect |
+|---|---|
+| `go sport` | mode `sport`, this message only |
+| `!pro` (alias `pro` → `sport`) | mode `sport`, this message only |
+| `use the heavy model` | mode `sport`, this message only |
+| `!gear 3` | gear `3`, this message only |
+| `use gear 2 do the thing` | gear `2`, this message only |
+| `stay on normal` | mode `normal`, sticky |
+| `!lock gear 1` | gear `1`, sticky |
+| `back to auto` / `!auto` | clear all sticky overrides |
+
+**Per-message by default, sticky on request.** A plain `!sport` or `go eco` affects only that
+message. Prefix with `stay` / `lock` / `hold` (or the `!stay` sigil) to make it stick, and the
+override survives for `directives.sticky_turns` user messages (default 10) before it expires
+back to automatic. `back to auto` (or `!auto`) clears every sticky override immediately.
+
+**Mode words are layered** (lowest precedence first; later wins on conflict):
+
+1. **Built-in** — `eco`/`fast`/`lite` → eco, `normal`/`balanced` → normal, `sport`/`heavy` → sport.
+2. **Auto-derived** from your configured model IDs — the token after the last `/`, split on `-`
+   and `.`, keeping alphabetic tokens (version bits like `v4` are dropped). A token that maps to
+   more than one *distinct* model is dropped; one shared by several modes maps to the lowest tier.
+3. **`directives.aliases`** — your explicit `word -> tier` overrides (highest precedence).
+
+Because they resolve to *slots* and *gear numbers*, your directives keep working when you swap
+models or providers — only the config (or the auto-derived aliases) changes, never your muscle
+memory.
+
 ### Cost tradeoff of the LLM classifier
 
 `use_llm_classifier: false` (default) costs **nothing** — the heuristic is pure string matching.
@@ -399,7 +451,12 @@ Alternatively, flip the config flag and restart:
   uses `thinkingConfig.thinkingLevel`; Amazon Bedrock uses `reasoningConfig`) are not mapped —
   override with `gears.key` for those, or extend the map in `src/effort.ts`.
 - **`set_gear` is sticky, in-memory**: a forced gear applies for the rest of the session until
-  cleared (`set_gear(auto=true)`); it does not persist across restarts.
+  cleared (`set_gear(auto=true)`); it does not persist across restarts. It shares the same manual
+  state as text directives, so `set_gear(auto=true)` and `back to auto` both clear mode **and**
+  gear together.
+- **Directives are recognized only at the start of a message**: `!sport`, `go eco`, etc. must be
+  the first thing you type (leading whitespace is fine). A word mid-message (`"refactor auth and
+  go sport"`) never triggers a directive.
 - **Heuristic false positives/negatives**: keyword matching is cheap, not perfect. Tune
   `sport_keywords` or enable the LLM classifier for higher precision.
 - **`switch_mode`/`set_gear`/`mcp_toggle` are agent-facing tools**, not user-facing slash commands —

@@ -11,11 +11,13 @@ import {
 import {
   normalizeConfig,
   resolveEffort,
+  deriveModeWords,
   type NormalizedConfig,
   type AutoShiftConfig,
   type GearsConfig,
   type ShiftConfig,
 } from "./config.js"
+import { parseDirective, StickyOverrides, type Directive } from "./directive.js"
 import { effortKeyFor } from "./effort.js"
 import { PendingSwitchRegistry } from "./relay.js"
 import { isSameModel, parseModelSpec, routeTarget } from "./routing.js"
@@ -43,9 +45,9 @@ const server: Plugin = async (input, options) => {
   const cfg = normalizeConfig(options)
   const { client, serverUrl } = input
 
-  // Manual gear override (null = automatic shifting). Sticky across messages
-  // until cleared — like moving a gearbox into manual mode.
-  let forcedGear: number | null = null
+  // Manual override state (mode + gear), shared by text directives and the
+  // `set_gear` tool. `null` values = automatic on that axis.
+  const overrides = new StickyOverrides()
 
   // Explicit model switches relayed by the `switch_mode` tool, keyed by session
   // ID. The auto-route hook honors these: a relayed message carries an explicit
@@ -69,25 +71,16 @@ const server: Plugin = async (input, options) => {
 
   return {
     "chat.message": async (hookInput, output) => {
-      if (!cfg.enabled || !cfg.autoRouteModels) return
+      if (!cfg.enabled) return
 
       const text = extractText(output.parts)
       if (!text) return
 
-      // Honor an explicit switch_mode relay: the message was sent with an
-      // explicit model override, so re-classifying it would bounce the switch
-      // back. Skip auto-routing for exactly this message. `take` consumes the
-      // entry (dropping it when the relay expired) so a stale relay can never
-      // exempt a later message from auto-routing.
-      if (pendingSwitches.take(hookInput.sessionID)) {
-        log(`switch relay honored — auto-route skipped for session ${hookInput.sessionID}`)
-        return
-      }
-
-      // Only route messages that belong to a primary agent. Subagent messages
-      // (task-tool subtasks) keep their own configured models — auto-routing
-      // them would override e.g. an sdd-apply agent pinned to the pro model.
-      if (hookInput.agent) {
+      // Only primary-agent messages drive routing and the manual directive
+      // layer. Subagent (task-tool) messages are ignored entirely, so a
+      // subagent prompt can neither be auto-routed nor set/hijack a sticky
+      // override — nor advance the sticky turn counter.
+      if (hookInput.agent && (cfg.autoRouteModels || cfg.directives.enabled)) {
         try {
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), 2000)
@@ -107,22 +100,65 @@ const server: Plugin = async (input, options) => {
         }
       }
 
-      const result = await classify(text)
-      const target = routeTarget(result.complexity, cfg)
-      if (!target) return
+      // Parse a leading text directive (`!sport`, `go eco`, `!gear 3`,
+      // `stay on normal`, `back to auto`, ...) and apply its sticky/clear
+      // effect. Per-message directives are consumed below during routing.
+      let directive: Directive | undefined
+      if (cfg.directives.enabled) {
+        directive = parseDirective(text, cfg.directives.modeWords)
+        if (directive?.clear) {
+          overrides.clear()
+          log("directive: back to auto — sticky overrides cleared")
+        } else if (directive?.sticky) {
+          overrides.apply({ mode: directive.mode, gear: directive.gear }, cfg.directives.stickyTurns)
+          log(
+            `directive: sticky override set (mode=${directive.mode ?? "-"}, gear=${directive.gear ?? "-"})`,
+          )
+        }
+      }
 
-      const spec = parseModelSpec(target)
-      if (!spec) {
-        log(`auto-route: invalid model specifier "${target}"`)
+      // Advance the sticky override's turn counter exactly once per user
+      // message (after reading this message's directive).
+      overrides.tick()
+
+      if (!cfg.autoRouteModels) return
+
+      // Honor an explicit switch_mode relay: the message was sent with an
+      // explicit model override, so re-classifying it would bounce the switch
+      // back. Skip auto-routing for exactly this message. `take` consumes the
+      // entry (dropping it when the relay expired) so a stale relay can never
+      // exempt a later message from auto-routing.
+      if (pendingSwitches.take(hookInput.sessionID)) {
+        log(`switch relay honored — auto-route skipped for session ${hookInput.sessionID}`)
         return
       }
 
-      // Skip the write when the message is already on the routed model to
-      // avoid needless session-model churn.
-      if (isSameModel(output.message.model, spec)) return
+      const writeModel = (target: string | undefined, reason: string): void => {
+        if (!target) return
+        const spec = parseModelSpec(target)
+        if (!spec) {
+          log(`auto-route: invalid model specifier "${target}"`)
+          return
+        }
+        if (isSameModel(output.message.model, spec)) return
+        output.message.model = spec
+        log(reason)
+      }
 
-      output.message.model = spec
-      log(`auto-route ${result.complexity} -> ${target} (matched: ${result.matched.join(", ") || "none"})`)
+      // A manual mode (per-message directive or sticky override) wins over the
+      // automatic classifier.
+      const forcedMode = directive?.mode ?? overrides.mode
+      if (forcedMode) {
+        writeModel(routeTarget(forcedMode, cfg), `directive: forced ${forcedMode} mode`)
+        return
+      }
+
+      const result = await classify(text)
+      const target = routeTarget(result.complexity, cfg)
+      writeModel(
+        target,
+        `auto-route ${result.complexity} -> ${target} (matched: ${result.matched.join(", ") || "none"})`,
+      )
     },
 
     "chat.params": async (hookInput, output) => {
@@ -137,13 +173,14 @@ const server: Plugin = async (input, options) => {
       const text = extractText(hookInput.message)
       if (!text) return
 
-      // A manually forced gear wins over the automatic shift program.
-      if (forcedGear !== null) {
-        const effort = cfg.gears.table[String(forcedGear)]
-        if (effort) {
-          log(`manual -> gear ${forcedGear} (${effort})`)
-          output.options[key] = effort
-        }
+      // A per-message gear directive or a sticky gear override wins over the
+      // automatic shift program.
+      const directive = cfg.directives.enabled ? parseDirective(text, cfg.directives.modeWords) : undefined
+      const gear = directive?.gear ?? overrides.gear
+      if (gear != null && cfg.gears.table[String(gear)] !== undefined) {
+        const effort = cfg.gears.table[String(gear)]
+        log(`manual -> gear ${gear} (${effort})`)
+        output.options[key] = effort
         return
       }
 
@@ -252,7 +289,7 @@ const server: Plugin = async (input, options) => {
         },
         async execute(args) {
           if (args.auto === true) {
-            forcedGear = null
+            overrides.clear()
             return { title: "set_gear", output: "Resumed automatic shifting" }
           }
           if (args.gear === undefined) {
@@ -269,7 +306,7 @@ const server: Plugin = async (input, options) => {
               output: `Unknown gear ${args.gear}. Configured gears: ${available}`,
             }
           }
-          forcedGear = args.gear
+          overrides.apply({ gear: args.gear }, 0)
           return { title: "set_gear", output: `Forced gear ${args.gear} (${effort})` }
         },
       }),
@@ -326,6 +363,8 @@ export {
   DEFAULT_NORMAL_KEYWORDS,
   normalizeConfig,
   resolveEffort,
+  deriveModeWords,
+  parseDirective,
   effortKeyFor,
   parseModelSpec,
   routeTarget,
@@ -339,6 +378,7 @@ export type {
   AutoShiftConfig,
   GearsConfig,
   ShiftConfig,
+  Directive,
 }
 
 export default {
